@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- mini-agent-harness ---
+# Local config: may point at private endpoints, and is per-machine.
+config.yaml
+# The agent's sandbox root — scratch space, not source.
+workspace/

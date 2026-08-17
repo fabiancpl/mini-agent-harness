@@ -1,0 +1,49 @@
+# Copy this file to config.yaml and edit it:
+#
+#     cp config.example.yaml config.yaml
+#
+# config.yaml is gitignored. No secret ever belongs in either file — see api_key_env below.
+
+llm:
+  # Any OpenAI-compatible server works: OpenAI, Ollama, vLLM, LM Studio, a gateway…
+  # Include the version segment, but no trailing slash: the client posts to
+  # {base_url}/chat/completions
+  base_url: "https://api.openai.com/v1"
+  model: "gpt-4o-mini"
+
+  # The NAME of the environment variable holding the key — not the key itself.
+  # Set it before running:  export OPENAI_API_KEY=sk-...
+  # For a local server that needs no auth, any placeholder value will do.
+  api_key_env: "OPENAI_API_KEY"
+
+  temperature: 0.0        # 0 keeps tool-calling behaviour deterministic and easy to debug
+  max_tokens: 2048
+  timeout_seconds: 60
+
+agent:
+  # The sandbox root. Every path the agent supplies is resolved under this folder, and
+  # anything that lands outside it is refused. Relative paths here are interpreted
+  # relative to THIS config file, so the config works from any working directory.
+  root_path: "./workspace"
+
+  # Hard upper bound on ReAct iterations. Stops a confused model from looping forever.
+  max_steps: 12
+
+  # Optional path to a text file replacing the built-in system prompt. null = built-in.
+  system_prompt_file: null
+
+tools:
+  # Which registered tools this agent may use, in the order they are advertised to the
+  # model. Removing a name here removes the capability entirely; delete the whole section
+  # to enable every registered tool.
+  #
+  # Note what is missing and cannot be added: there is no delete, remove, rename, or shell
+  # tool anywhere in the registry. The agent cannot destroy your files because that ability
+  # was never built, not because a prompt asked it nicely.
+  enabled:
+    - list_directory
+    - find_files
+    - read_file
+    - create_directory
+    - write_file
+    - edit_file
