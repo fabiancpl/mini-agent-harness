@@ -30,25 +30,30 @@ obvious code over clever code, and explains its design decisions in comments.
 
 ## Status
 
-Complete and tested: 284 tests, 99% coverage (no partial branches), ~2 seconds, no network.
+Complete and tested: 285 tests, 99% coverage (no partial branches), ~2 seconds, no network.
 [`PLAN.md`](PLAN.md) is the design document; [`CLAUDE.md`](CLAUDE.md) holds the invariants
 and conventions.
 
-## Quickstart
+## Quickstart — no API key needed
 
 ```bash
 uv sync --extra dev            # or: pip install -e ".[dev]"
 
-cp config.example.yaml config.yaml
-export OPENAI_API_KEY=sk-...   # the name of this variable is what config.yaml stores
-
-python -m mini_agent --task "list the files here and summarise README.md"
-python -m mini_agent           # interactive REPL
+python examples/offline_demo.py
 pytest                         # the test suite; it never touches the network
 ```
 
-Any OpenAI-compatible endpoint works — point `llm.base_url` at Ollama, vLLM, or LM Studio
-to run the whole thing locally for free.
+The demo stands in for the model: it starts a tiny HTTP server on localhost that speaks the
+OpenAI `/chat/completions` protocol and replays a fixed script of replies, then points the
+real CLI at it. Everything except the model's *decisions* is real — a real socket, real JSON
+on the wire, the real config loader, the real sandbox, real files on disk.
+
+It is scripted to hit both safety properties: at step 4 the model invents a `delete_file`
+tool that does not exist, and at step 5 it tries to overwrite a file. Both are refused, both
+refusals come back as observations, and the model adapts and finishes. Nothing is lost.
+
+See [`examples/offline_demo.py`](examples/offline_demo.py) — it is about 60 lines of scripted
+conversation and is meant to be read.
 
 ## What a run looks like
 
@@ -68,6 +73,104 @@ I listed the workspace, wrote summary.md, and was refused access outside the roo
 `-` is a tool call that worked, `!` one that was refused. Step 3 is the sandbox doing its
 job: the refusal goes back to the model as an observation, so it adapts and finishes instead
 of crashing. Add `--verbose` to see the reasoning and full observation behind each step.
+
+## Connect a real model
+
+Two things are required: a **config file**, and the **API key in an environment variable**.
+A custom system prompt is *optional* — leave `system_prompt_file: null` and the built-in
+prompt in `agent.py` is used.
+
+**1. Create the config.** `config.yaml` is gitignored, so your endpoint and settings stay
+local:
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Edit the three values that matter:
+
+```yaml
+llm:
+  base_url: "https://api.openai.com/v1"   # include /v1, no trailing slash
+  model: "gpt-4o-mini"
+  api_key_env: "OPENAI_API_KEY"           # the NAME of the variable, not the key
+```
+
+**2. Export the key.** The config stores a variable *name*, never the secret, so nothing
+sensitive can end up in git:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+**3. Run it.**
+
+```bash
+python -m mini_agent --task "list the files here and tell me what this workspace is"
+python -m mini_agent                      # interactive REPL
+python -m mini_agent --verbose            # show reasoning and full observations
+python -m mini_agent --root ./sandbox     # override the workspace for one run
+```
+
+### Providers
+
+Anything OpenAI-compatible works. `base_url` and `model` are the only differences:
+
+| Provider | `base_url` | Notes |
+| --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` is cheap and calls tools reliably |
+| Ollama | `http://localhost:11434/v1` | Free and local. Use a tool-calling model such as `qwen2.5` or `llama3.1`. The key is unused, but export any placeholder |
+| vLLM | `http://localhost:8000/v1` | Launch with `--enable-auto-tool-choice` |
+| LM Studio | `http://localhost:1234/v1` | Enable the local server in the UI |
+| OpenRouter | `https://openrouter.ai/api/v1` | Model names are namespaced, e.g. `openai/gpt-4o-mini` |
+
+Small local models are the interesting stress test: they forget arguments, emit invalid JSON,
+and invent tools. Every one of those paths is handled and turned back into an observation —
+watching it happen with `--verbose` teaches more than any amount of reading.
+
+### Writing your own system prompt
+
+Optional. To override the built-in one:
+
+```yaml
+agent:
+  system_prompt_file: "./prompts/my_prompt.txt"   # resolved relative to config.yaml
+```
+
+The built-in prompt is `DEFAULT_SYSTEM_PROMPT` in `src/mini_agent/agent.py` — start by
+copying it. Two things in it are load-bearing:
+
+- **"Before each tool call, briefly say what you are doing and why."** This is what keeps the
+  *reasoning* half of ReAct visible. Drop it and the model still works, but every step's
+  thought comes back empty and the trace becomes unreadable.
+- **"When the task is done, reply with a short summary and no tool call."** This is the loop's
+  exit condition. A model that never stops calling tools runs until `max_steps`.
+
+### Tuning
+
+| Setting | Effect |
+| --- | --- |
+| `agent.max_steps` | Hard bound on the loop, and your cost ceiling. 12 is generous for small tasks |
+| `agent.root_path` | The sandbox. Relative paths resolve against `config.yaml`, not your shell |
+| `llm.temperature` | `0.0` keeps tool calling deterministic and debuggable |
+| `tools.enabled` | Delete the whole section for every tool; list only the first four for a **read-only agent** that can explore and explain but never touch anything |
+
+### When something goes wrong
+
+Every expected failure prints one line beginning `error:` — no traceback, because a stack
+trace would describe *this* code when the problem is in your setup.
+
+| Message | Cause |
+| --- | --- |
+| `Config file not found: config.yaml` | Run `cp config.example.yaml config.yaml` |
+| `Environment variable 'X' (llm.api_key_env) is unset or empty` | `export X=...` in the shell you are running from |
+| `Unknown key(s) ['...'] in section 'agent'` | A typo. Unknown keys are rejected rather than silently ignored |
+| `returned HTTP 401: ...` | Bad or missing key. The provider's own message follows |
+| `returned HTTP 404: ...` | Usually `base_url` missing `/v1`, or a model name the provider does not know |
+| `Could not reach http://...` | Nothing is listening — check your local server is running |
+| `did not return JSON` | A proxy or error page came back instead of the API. The first 200 characters are shown |
+| `Model sent invalid JSON arguments for X` | The model produced malformed tool arguments. Common with small local models; try a larger one or a tool-calling fine-tune |
+| `Stopped after N steps without finishing` | Hit `max_steps`. Raise it, or give a smaller task. Exit code is 1 |
 
 ## What the agent can do
 
@@ -142,6 +245,8 @@ project. See `sandbox.py` and the docstring at the top of `tools/write.py` for t
 | `src/mini_agent/agent.py` | The ReAct loop |
 | `src/mini_agent/cli.py` | Argument parsing and the REPL |
 | `tests/` | One test module per source module |
+| `examples/offline_demo.py` | The whole stack over a real socket, with no API key |
+| `TESTING.md` | Test layers, what "end-to-end" means for an agent, why evals stay out of the suite |
 
 ## Where to take it next
 

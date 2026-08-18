@@ -27,9 +27,10 @@ feature coverage, and defensive robustness.
 ```bash
 uv sync --extra dev                 # install (or: pip install -e ".[dev]")
 
+python examples/offline_demo.py     # see the whole thing run, no API key needed
 pytest                              # run the full test suite
 pytest -q tests/test_sandbox.py     # run one module
-pytest --cov=mini_agent             # coverage
+pytest --cov=mini_agent --cov-branch # coverage
 
 cp config.example.yaml config.yaml  # create a local config (gitignored)
 export OPENAI_API_KEY=sk-...        # the key is read from the env, never from the file
@@ -39,6 +40,9 @@ python -m mini_agent                              # interactive REPL
 python -m mini_agent --task "summarise README.md" # one-shot
 python -m mini_agent --config config.yaml --verbose
 ```
+
+`README.md` has the full setup guide for a real endpoint; `TESTING.md` covers the test
+layers, what "end-to-end" means for an agent, and why evals are kept out of the suite.
 
 ## Architecture
 
@@ -102,3 +106,7 @@ behaviour here, the tests must be updated deliberately, never "fixed" to pass.
   `requests.post`; `agent.py` is tested with a scripted fake client.
 - Every test names the behaviour it protects: `test_read_file_rejects_parent_traversal`.
 - New tool ⇒ new test module covering the happy path, an input error, and an escape attempt.
+- **Adding a test for a guard? Delete the guard and confirm the test fails.** Three guards
+  here sat at 100% coverage while the case they exist for never ran — see the warning at the
+  end of `TESTING.md`.
+- Real-endpoint runs are evals, not tests, and stay out of the suite. `TESTING.md` explains.

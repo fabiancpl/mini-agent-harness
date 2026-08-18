@@ -21,7 +21,10 @@ A minimal but complete agent harness:
 mini-agent-harness/
 ├── CLAUDE.md               # working guidance + invariants
 ├── PLAN.md                 # this file
-├── README.md               # user-facing quickstart
+├── README.md               # quickstart, real-endpoint setup, troubleshooting
+├── TESTING.md              # test layers, what e2e means here, why evals stay out
+├── examples/
+│   └── offline_demo.py     # the whole stack over a real socket, no API key
 ├── pyproject.toml          # package metadata, deps, pytest config
 ├── config.example.yaml     # documented template; copy to config.yaml
 ├── src/mini_agent/
@@ -64,12 +67,16 @@ agent:
 
 tools:
   enabled:                                # registry is the menu, this is the order
-    - list_directory
-    - find_files
+    - list_directory                      # omit the whole section to enable everything;
+    - find_files                          # list only the first four for a read-only agent
+    - search_text
     - read_file
     - create_directory
     - write_file
+    - append_to_file
     - edit_file
+    - move
+    - copy
 ```
 
 Rules:
@@ -271,7 +278,7 @@ Design notes:
 `pytest`, no mocking library — `tmp_path` and small fakes only. Target: every invariant in
 `CLAUDE.md` has at least one test that fails if the invariant is removed.
 
-**As built: 284 tests, 99% line coverage and no partial branches** (`__main__.py` is covered
+**As built: 285 tests, 99% line coverage and no partial branches** (`__main__.py` is covered
 by a subprocess test that `coverage` cannot see into; every other module is at 100% under
 `--cov-branch`). Runs in ~2s, no network.
 
@@ -316,3 +323,16 @@ Streaming responses, conversation persistence across CLI sessions, retries/backo
 accounting, parallel tool execution, sub-agents, MCP, and shell execution. Each would add
 real code for little teaching value here. The natural extensions are listed in the README so
 a reader knows where to take it next.
+
+**Evals against a real provider** are deferred rather than rejected. They are the one thing
+that can measure prompt changes or surface failure modes a script cannot invent, but they
+cost money, cannot be deterministic, and must stay out of the test suite. `TESTING.md` has
+the reasoning and a concrete sketch for when they are built.
+
+Also considered and declined: a larger HTTP-level test suite (connection refused, timeouts,
+401 handling over a real socket). `test_llm.py` already covers all of those against a
+monkeypatched `requests.post`, in a form a reader can follow in seconds. Re-testing them
+over a threaded server would add daemon threads, `shutdown()`, and port binding — concepts
+that teach HTTP test infrastructure rather than agent building, which is the trade this
+project exists to refuse. `examples/offline_demo.py` covers the wire once, and earns its
+place by being useful for something else.
