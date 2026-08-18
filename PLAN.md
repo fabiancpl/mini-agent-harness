@@ -11,8 +11,9 @@ A minimal but complete agent harness:
 - a **CLI** for interactive and one-shot use,
 - **YAML configuration** for the endpoint, model, API key source, and agent limits,
 - a **tool registry** giving the agent file-system capabilities that are *safe by
-  construction*: it can navigate, read, create, and modify inside one root folder, and it
-  has no ability at all to delete anything or to touch a path outside that root.
+  construction*: it can navigate, search, read, create, modify, and reorganise inside one
+  root folder, but no tool can make existing content unreachable, and none can touch a path
+  outside that root.
 
 ## 2. Repository layout
 
@@ -32,9 +33,10 @@ mini-agent-harness/
 │   ├── registry.py         # Tool + ToolRegistry
 │   ├── tools/
 │   │   ├── __init__.py     # build_registry(sandbox, allowed) — the ONE place tools are wired
-│   │   ├── navigate.py     # list_directory, find_files
+│   │   ├── navigate.py     # list_directory, find_files, search_text
 │   │   ├── read.py         # read_file
-│   │   └── write.py        # create_directory, write_file, edit_file
+│   │   └── write.py        # create_directory, write_file, append_to_file,
+│   │                       # edit_file, move, copy
 │   ├── llm.py              # OpenAI-compatible chat client
 │   ├── agent.py            # the ReAct loop
 │   └── cli.py              # argparse + REPL + trace printing
@@ -151,11 +153,21 @@ an observation so the model can retry.
 | `read_file` | `path`, `start_line` (default 1), `max_lines` (default 400) | Numbered lines. `ToolError` if missing, a directory, larger than 1 MiB, or not UTF-8 decodable. |
 | `create_directory` | `path` | Creates parents; succeeding on an existing directory is fine (idempotent). `ToolError` if a *file* is already there. |
 | `write_file` | `path`, `content` | Creates or fully overwrites; creates parent directories. `ToolError` if the path is a directory. |
-| `edit_file` | `path`, `old_text`, `new_text` | Exact single-occurrence string replacement. `ToolError` if the file is missing, `old_text` is absent, or it appears more than once (ambiguous — the model must add context). |
+| `search_text` | `pattern`, `path` (default `"."`), `file_pattern` (default `"*"`) | Regex search of file contents, returning `path:line: text`. Lines trimmed to 200 chars, capped at 100 hits. Binary and oversized files are **skipped and counted**, not errors — unlike `read_file`, a tree search must step over what it cannot read. `ToolError` on an invalid regex. |
+| `append_to_file` | `path`, `content` | Appends, creating the file and parents if missing. The only mutation that cannot destroy anything. `ToolError` if the path is a directory. |
+| `move` | `source`, `destination` | Renames or relocates a file or directory. `destination` is the complete new path, never a folder to drop into. |
+| `copy` | `source`, `destination` | Same contract as `move`, but the source stays. Directories copy recursively. |
 
-**Deliberately absent:** any delete, remove, rename, move, or shell-execution tool. The
-prompt does not forbid deletion; the capability simply does not exist. That is the lesson —
-a capability you never grant cannot be talked out of you by a jailbreak.
+`move` and `copy` share `_resolve_relocation`, which enforces, in order: both paths inside
+the root (a relocation has two ends — checking only the source would be a hole); the source
+exists; **the destination does not exist**; and the destination is not inside the source.
+
+**The invariant:** *no operation may make existing content unreachable.* Stated about
+effects rather than names, because `write_file` already overwrites — the promise is that
+nothing becomes **unrecoverable**. `move(a, b)` with `b` free is undone by `move(b, a)`;
+`move` onto an existing `b` has no inverse, so it is refused. Deletion has no such
+precondition, which is why there is no delete, remove, unlink, or shell tool. A capability
+you never grant cannot be talked out of you by a jailbreak.
 
 ## 6. LLM client
 
@@ -230,17 +242,17 @@ Design notes:
 `pytest`, no mocking library — `tmp_path` and small fakes only. Target: every invariant in
 `CLAUDE.md` has at least one test that fails if the invariant is removed.
 
-**As built: 227 tests, 99% line coverage** (`__main__.py` is covered by a subprocess test
+**As built: 279 tests, 99% line coverage** (`__main__.py` is covered by a subprocess test
 that `coverage` cannot see into; every other module is at 100%). Runs in ~2s, no network.
 
 | Module | Covers |
 | --- | --- |
 | `test_config.py` | Valid load; defaults; missing file; malformed YAML; unknown key; missing `api_key_env` var; unknown tool name in `enabled`; `root_path` resolved relative to the config file; root auto-created. |
 | `test_sandbox.py` | The ten path cases from §4; `relative()` output; root auto-resolution. |
-| `test_registry.py` | Register/get; duplicate name; unknown name; `to_schemas()` shape matches the OpenAI contract; `build_registry` honours `enabled` and its order; **no delete-like tool name exists**. |
-| `test_tools_navigate.py` | Listing order and `/` markers; empty directory; missing path; file-not-directory; glob matching and the 200-hit cap; escape attempts on both tools. |
+| `test_registry.py` | Register/get; duplicate name; unknown name; `to_schemas()` shape matches the OpenAI contract; `invoke` turns bad arguments into `ToolError`; `build_registry` honours `enabled` and its order; a name-matching **lint** against destructive tool names (documented as a tripwire, not the guarantee); and the real check — **`move` and `copy`, invoked through the wired registry, refuse to overwrite**. |
+| `test_tools_navigate.py` | Listing order and `/` markers; empty directory; missing path; file-not-directory; glob matching and the 200-hit cap; `search_text` formatting, regex support, invalid regex, `file_pattern` and `path` narrowing, **skipping binary and oversized files**, the skipped count, long-line trimming, the 100-hit cap; escape attempts on all three tools, including that a symlink out of the root leaks neither a filename nor a line of content. |
 | `test_tools_read.py` | Content and line numbering; `start_line`/`max_lines` windowing; past-EOF; missing file; directory; oversize file; binary file; escape attempt. |
-| `test_tools_write.py` | Create nested directory; idempotent re-create; file-in-the-way; write creates parents; write overwrites; write onto a directory; edit replaces exactly once; missing `old_text`; ambiguous `old_text`; edit on a missing file; escape attempts on all three; **round-trip: write then read returns the same content**. |
+| `test_tools_write.py` | Create nested directory; idempotent re-create; file-in-the-way; write creates parents, overwrites, refuses a directory; append preserves prior content, creates when missing, refuses a directory; edit replaces exactly once, refuses missing/ambiguous `old_text`; `move` renames, moves directories with contents, **round-trips**, and refuses an existing destination, a missing source, and a directory into itself; `copy` duplicates files and trees and **leaves the source unchanged**; escape attempts on every tool and on **both** ends of `move`/`copy`; `OSError` becomes a `ToolError` everywhere. |
 | `test_llm.py` | Request URL, auth header, and payload shape; `tool_choice: auto`; parsing a plain answer, one tool call, and batched calls; arguments sent as an object; missing call id; malformed arguments JSON, non-JSON body, HTTP error, connection failure ⇒ `LLMError`; `to_history_entry` round-trips through the parser. |
 | `test_agent.py` | Answer with no tool call; one tool call then answer; multi-step; batched tool calls in one message; unknown tool, `ToolError`, escape attempt, and bad arguments each ⇒ observation and the loop continues; `LLMError` propagates; `max_steps` exhaustion reports `answer=None`; history shape (`tool` messages carry the matching `tool_call_id`); `on_step` fires once per step; the loop prints nothing. |
 | `test_cli.py` | Arg parsing and precedence; one-shot run with a fake client; quiet vs `--verbose` output; failed calls marked; long arguments truncated on screen; `--root`/`--max-steps` overrides; REPL exit, Ctrl-D, blank lines, error recovery, per-task conversation isolation, Ctrl-C mid-run; `HarnessError` ⇒ exit code 1, one line, no traceback; `python -m mini_agent` runs as a subprocess. |

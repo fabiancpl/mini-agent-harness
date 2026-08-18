@@ -35,15 +35,25 @@ agent:
 tools:
   # Which registered tools this agent may use, in the order they are advertised to the
   # model. Removing a name here removes the capability entirely; delete the whole section
-  # to enable every registered tool.
+  # to enable every registered tool. Listing only the first four gives you a read-only
+  # agent that can explore and explain but never touch anything.
   #
-  # Note what is missing and cannot be added: there is no delete, remove, rename, or shell
+  # Note what is missing and cannot be added: there is no delete, remove, unlink, or shell
   # tool anywhere in the registry. The agent cannot destroy your files because that ability
   # was never built, not because a prompt asked it nicely.
+  #
+  # move and copy are here despite sounding destructive: both refuse to overwrite an
+  # existing destination, so content is always preserved and every relocation can be
+  # undone. That is the line this project draws -- no operation may make existing content
+  # unreachable.
   enabled:
     - list_directory
     - find_files
+    - search_text
     - read_file
     - create_directory
     - write_file
+    - append_to_file
     - edit_file
+    - move
+    - copy

@@ -51,7 +51,7 @@ in isolation.
 | `config.py` | Load + validate YAML into frozen dataclasses. Resolves the API key from the environment. |
 | `sandbox.py` | The security boundary. Turns an agent-supplied path string into a real path proven to live under the root. |
 | `registry.py` | `Tool` (name, description, JSON-Schema params, handler) and `ToolRegistry` (register / get / list / export OpenAI schemas). |
-| `tools/` | The actual tool implementations. Each takes a `Sandbox` plus keyword arguments and returns a string observation. |
+| `tools/` | The ten tool implementations. Each takes a `Sandbox` plus keyword arguments and returns a string observation. `navigate.py` finds things (`list_directory`, `find_files`, `search_text`), `read.py` reads one (`read_file`), `write.py` changes them (`create_directory`, `write_file`, `append_to_file`, `edit_file`, `move`, `copy`). |
 | `llm.py` | Thin OpenAI-compatible `/chat/completions` client. One method: `complete(messages, tools) -> Message`. |
 | `agent.py` | The ReAct loop: think → call tool → observe → repeat, until a final answer or `max_steps`. |
 | `cli.py` | Argument parsing, the REPL, and printing the trace. No business logic. |
@@ -68,9 +68,14 @@ behaviour here, the tests must be updated deliberately, never "fixed" to pass.
 2. **Nothing escapes the root.** `..` traversal, absolute paths outside the root, and
    symlinks pointing outside the root are all rejected with `PathOutsideRootError`.
    Resolution happens *before* the access, not after.
-3. **No deletion is possible.** There is no delete/remove/rename tool in the registry, and
-   no tool truncates a directory. The capability is absent by construction, not blocked by
-   a check. Do not add one.
+3. **No operation may make existing content unreachable.** This is a claim about effects,
+   not names — `write_file` overwrites, so content loss is already possible; what must never
+   happen is content becoming *unrecoverable*. `move` and `copy` satisfy it by refusing an
+   existing destination, which keeps every relocation invertible. Deletion has no such
+   precondition, so there is no delete, remove, unlink, or shell tool anywhere, and none may
+   be added. `test_no_obviously_destructive_tool_is_registered` is a name-matching **lint**
+   against accidental additions, not the guarantee itself; the guarantee is that
+   `build_registry` is the single explicit wiring point.
 4. **Tool failures are observations, never crashes.** A `ToolError` is caught by the loop
    and fed back to the model as the observation text so it can recover. Only genuinely
    unexpected exceptions propagate.

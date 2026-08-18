@@ -96,6 +96,50 @@ def test_the_tools_actually_change_the_sandbox(registry: ToolRegistry, sandbox: 
     assert (sandbox.root / "out" / "report.md").read_text(encoding="utf-8") == "# Report\n"
 
 
+def test_the_tools_compose_into_a_safe_refactor(registry: ToolRegistry, sandbox: Sandbox) -> None:
+    # The workflow the tool set is designed around: find it, back it up, then change it.
+    # Nothing is ever destroyed, because the backup exists before the edit happens.
+    agent, _ = make_agent(
+        [
+            acts("Where is it?", ("search_text", {"pattern": "hello"})),
+            acts("Back it up first.", ("copy", {"source": "notes.txt", "destination": "notes.bak"})),
+            acts(
+                "Now change it.",
+                ("edit_file", {"path": "notes.txt", "old_text": "hello", "new_text": "goodbye"}),
+            ),
+            answer("Backed up to notes.bak and updated notes.txt."),
+        ],
+        registry,
+    )
+
+    result = agent.run("change hello to goodbye, safely")
+
+    assert "notes.txt:1: hello" in result.steps[0].observations[0].content
+    assert (sandbox.root / "notes.bak").read_text(encoding="utf-8") == "hello\n"
+    assert (sandbox.root / "notes.txt").read_text(encoding="utf-8") == "goodbye\n"
+    assert not any(observation.failed for step in result.steps for observation in step.observations)
+
+
+def test_a_refused_overwrite_becomes_an_observation(registry: ToolRegistry, sandbox: Sandbox) -> None:
+    # The model tries to clobber a file, is refused, and adapts -- the run survives and the
+    # file it aimed at is still there.
+    (sandbox.root / "keep.txt").write_text("precious\n", encoding="utf-8")
+    agent, _ = make_agent(
+        [
+            acts("Renaming.", ("move", {"source": "notes.txt", "destination": "keep.txt"})),
+            answer("That name was taken, so I left everything alone."),
+        ],
+        registry,
+    )
+
+    result = agent.run("rename notes.txt to keep.txt")
+
+    assert result.steps[0].observations[0].failed is True
+    assert "already exists" in result.steps[0].observations[0].content
+    assert (sandbox.root / "keep.txt").read_text(encoding="utf-8") == "precious\n"
+    assert result.answer == "That name was taken, so I left everything alone."
+
+
 def test_batches_several_tool_calls_from_one_message(registry: ToolRegistry) -> None:
     agent, _ = make_agent(
         [

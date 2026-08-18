@@ -12,10 +12,14 @@ from mini_agent.tools import build_registry
 ALL_TOOL_NAMES = [
     "list_directory",
     "find_files",
+    "search_text",
     "read_file",
     "create_directory",
     "write_file",
+    "append_to_file",
     "edit_file",
+    "move",
+    "copy",
 ]
 
 
@@ -187,13 +191,42 @@ def test_built_tools_are_bound_to_the_sandbox(sandbox: Sandbox) -> None:
 
 # --- the capability that must not exist -----------------------------------------------------
 
+# Note what is *not* here: 'rename' and 'move'. Relocating something preserves its content
+# and has an exact inverse, so it does not violate the invariant -- provided it refuses to
+# overwrite, which `test_relocation_tools_refuse_to_overwrite` below is what actually checks.
+FORBIDDEN_NAME_PARTS = ["delete", "remove", "rm", "unlink", "rmdir", "trash", "exec", "shell", "eval"]
 
-@pytest.mark.parametrize("forbidden", ["delete", "remove", "rm", "rename", "move", "exec", "run"])
-def test_no_destructive_tool_is_registered(sandbox: Sandbox, forbidden: str) -> None:
-    """The core guarantee: destruction is absent by construction, not blocked by a prompt.
 
-    If this test fails, someone added a capability that changes the safety story of the
-    whole project. That must be a deliberate, documented decision -- never a passing edit.
+@pytest.mark.parametrize("forbidden", FORBIDDEN_NAME_PARTS)
+def test_no_obviously_destructive_tool_is_registered(sandbox: Sandbox, forbidden: str) -> None:
+    """A lint against accidental additions -- not the guarantee itself.
+
+    Be clear about what this can and cannot do. It matches on *names*, so a tool called
+    `tidy_workspace` that unlinked files would sail straight past it. The real guarantee is
+    structural: `build_registry` is the single place tools are wired, so reviewing one
+    function tells you everything the agent can do.
+
+    What this test buys is a tripwire. Adding a capability that changes the safety story of
+    the project should be a deliberate, documented decision, and failing here forces the
+    person doing it to notice.
     """
     for name in build_registry(sandbox).names():
         assert forbidden not in name.split("_"), f"{name!r} looks destructive"
+
+
+@pytest.mark.parametrize("tool_name", ["move", "copy"])
+def test_relocation_tools_refuse_to_overwrite(sandbox: Sandbox, tool_name: str) -> None:
+    """The actual invariant, checked through the wired registry: nothing becomes unreachable.
+
+    `move` and `copy` are the two tools that could destroy content without being named
+    anything alarming -- both would silently clobber the destination if they used the raw
+    stdlib calls. This asserts the guard is in place on the tools the agent really gets.
+    """
+    (sandbox.root / "source.txt").write_text("new\n", encoding="utf-8")
+    (sandbox.root / "occupied.txt").write_text("must survive\n", encoding="utf-8")
+    registry = build_registry(sandbox)
+
+    with pytest.raises(ToolError, match="already exists"):
+        registry.invoke(tool_name, {"source": "source.txt", "destination": "occupied.txt"})
+
+    assert (sandbox.root / "occupied.txt").read_text(encoding="utf-8") == "must survive\n"

@@ -1,17 +1,31 @@
-"""Tools for finding your way around: `list_directory` and `find_files`."""
+"""Tools for finding things: `list_directory`, `find_files`, and `search_text`.
+
+The last two are the pair worth understanding together. `find_files` searches file *names*
+("where is the config?"); `search_text` searches file *contents* ("where is this function
+called?"). An agent without the second one has to read files one at a time to find anything,
+which spends its whole step budget on looking rather than doing.
+"""
 
 from __future__ import annotations
 
+import re
 from functools import partial
 
 from ..errors import ToolError
 from ..registry import Tool
 from ..sandbox import Sandbox
-from .common import plural
+from .common import load_text, plural
 
 #: Cap on `find_files` results. A glob like '*' in a node_modules-sized tree would otherwise
 #: return tens of thousands of lines and blow out the context window.
 MAX_MATCHES = 200
+
+#: Cap on `search_text` results -- lower than MAX_MATCHES because each hit is a whole line of
+#: source, not a short path.
+MAX_TEXT_MATCHES = 100
+
+#: Individual matched lines are trimmed to this. A minified bundle can be one 400 KB line.
+MAX_LINE_CHARS = 200
 
 
 def list_directory(sandbox: Sandbox, path: str = ".") -> str:
@@ -60,6 +74,51 @@ def find_files(sandbox: Sandbox, pattern: str, path: str = ".") -> str:
         hidden = plural(len(matches) - MAX_MATCHES, "more match", "more matches")
         lines.append(f"... {hidden} not shown, narrow the pattern")
     header = f"{plural(len(matches), 'match', 'matches')} for {pattern!r}:"
+    return "\n".join([header, *lines])
+
+
+def search_text(
+    sandbox: Sandbox, pattern: str, path: str = ".", file_pattern: str = "*"
+) -> str:
+    """Search file contents for a regular expression, grep-style."""
+    try:
+        expression = re.compile(pattern)
+    except re.error as exc:
+        # Recoverable: the model reads this and writes a valid pattern on the next step.
+        raise ToolError(f"{pattern!r} is not a valid regular expression: {exc}") from exc
+
+    target = sandbox.resolve(path)
+    if not target.is_dir():
+        raise ToolError(f"No such directory to search: {path!r}")
+
+    matches: list[str] = []
+    skipped = 0
+    for candidate in sorted(target.rglob(file_pattern)):
+        if not candidate.is_file() or not candidate.resolve().is_relative_to(sandbox.root):
+            continue
+        try:
+            text = load_text(candidate, sandbox.relative(candidate))
+        except ToolError:
+            # Binary or oversized. Unlike read_file, where the model named one specific
+            # file, a tree search must step over what it cannot read: failing the whole
+            # call because one PNG exists would make the tool useless in a real project.
+            skipped += 1
+            continue
+
+        for number, line in enumerate(text.splitlines(), start=1):
+            if expression.search(line):
+                trimmed = line if len(line) <= MAX_LINE_CHARS else f"{line[:MAX_LINE_CHARS]}..."
+                matches.append(f"{sandbox.relative(candidate)}:{number}: {trimmed}")
+
+    footer = f" ({plural(skipped, 'unreadable file')} skipped)" if skipped else ""
+    if not matches:
+        return f"No matches for {pattern!r} under {sandbox.relative(target)}{footer}"
+
+    lines = matches[:MAX_TEXT_MATCHES]
+    if len(matches) > MAX_TEXT_MATCHES:
+        hidden = plural(len(matches) - MAX_TEXT_MATCHES, "more match", "more matches")
+        lines.append(f"... {hidden} not shown, narrow the pattern")
+    header = f"{plural(len(matches), 'match', 'matches')} for {pattern!r}{footer}:"
     return "\n".join([header, *lines])
 
 
@@ -115,5 +174,36 @@ def make_tools(sandbox: Sandbox) -> list[Tool]:
                 "additionalProperties": False,
             },
             handler=partial(find_files, sandbox),
+        ),
+        Tool(
+            name="search_text",
+            description=(
+                "Search inside files for a regular expression and return matching lines as "
+                "'path:line: text'. Use this to find where something is written or used; "
+                "use find_files when you are looking for a file by its name instead. "
+                "Binary and very large files are skipped automatically."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Regular expression to search for, e.g. 'def \\w+_file'.",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Directory to search under, relative to the root.",
+                        "default": ".",
+                    },
+                    "file_pattern": {
+                        "type": "string",
+                        "description": "Only search files whose name matches this glob.",
+                        "default": "*",
+                    },
+                },
+                "required": ["pattern"],
+                "additionalProperties": False,
+            },
+            handler=partial(search_text, sandbox),
         ),
     ]
