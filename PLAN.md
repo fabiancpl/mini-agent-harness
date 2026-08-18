@@ -271,8 +271,16 @@ Design notes:
 `pytest`, no mocking library — `tmp_path` and small fakes only. Target: every invariant in
 `CLAUDE.md` has at least one test that fails if the invariant is removed.
 
-**As built: 279 tests, 99% line coverage** (`__main__.py` is covered by a subprocess test
-that `coverage` cannot see into; every other module is at 100%). Runs in ~2s, no network.
+**As built: 284 tests, 99% line coverage and no partial branches** (`__main__.py` is covered
+by a subprocess test that `coverage` cannot see into; every other module is at 100% under
+`--cov-branch`). Runs in ~2s, no network.
+
+A caution the suite earned the hard way: full coverage is not proof that a guard is tested.
+Three checks here were green while the case they exist for never ran — the containment
+filters in `find_files` and `search_text` were only ever exercised against symlinked
+*directories*, which `rglob` declines to descend into anyway, and the self-nesting check in
+`_resolve_relocation` was only exercised in the form that fails harmlessly. Each now has a
+test that fails when the guard is deleted, which is the property that actually matters.
 
 | Module | Covers |
 | --- | --- |

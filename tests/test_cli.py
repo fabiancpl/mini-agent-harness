@@ -112,6 +112,20 @@ def test_verbose_mode_shows_the_thought_and_the_observation(cli_config: Path, ca
     assert "notes.txt" in output  # the observation itself
 
 
+def test_verbose_mode_handles_a_step_with_no_reasoning(cli_config: Path, capsys) -> None:
+    # Models often return tool calls with content: None. The step must still render, and
+    # without an empty line standing in for the reasoning that was never there.
+    main(
+        ["--config", str(cli_config), "--task", "look", "--verbose"],
+        llm_factory=fake_llm(acts(None, ("list_directory", {})), answer("Done.")),
+    )
+
+    output = capsys.readouterr().out
+    assert "step 1" in output
+    assert "  -> list_directory()" in output
+    assert "\n\n  ->" not in output  # no blank line where the thought would have gone
+
+
 def test_failed_tool_calls_are_marked(cli_config: Path, capsys) -> None:
     main(
         ["--config", str(cli_config), "--task", "escape"],

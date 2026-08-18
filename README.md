@@ -30,7 +30,7 @@ obvious code over clever code, and explains its design decisions in comments.
 
 ## Status
 
-Complete and tested: 279 tests, 99% coverage, ~2 seconds, no network.
+Complete and tested: 284 tests, 99% coverage (no partial branches), ~2 seconds, no network.
 [`PLAN.md`](PLAN.md) is the design document; [`CLAUDE.md`](CLAUDE.md) holds the invariants
 and conventions.
 

@@ -101,8 +101,12 @@ def answer(text: str) -> Message:
     return Message(content=text)
 
 
-def acts(thought: str, *calls: tuple[str, dict[str, Any]]) -> Message:
-    """A model message that reasons and then calls one or more tools."""
+def acts(thought: str | None, *calls: tuple[str, dict[str, Any]]) -> Message:
+    """A model message that reasons and then calls one or more tools.
+
+    `thought` may be None: models routinely return tool calls with no accompanying text,
+    and the CLI has to render that step without a blank line where the reasoning would be.
+    """
     return Message(
         content=thought,
         tool_calls=tuple(

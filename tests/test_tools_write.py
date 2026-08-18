@@ -351,9 +351,12 @@ def test_refuses_to_move_something_that_does_not_exist(sandbox: Sandbox) -> None
         move(sandbox, "ghost.md", "elsewhere.md")
 
 
-def test_refuses_to_move_a_directory_into_itself(project: Sandbox) -> None:
+@pytest.mark.parametrize("destination", ["src/nested", "src/deep/here"])
+def test_refuses_to_move_a_directory_into_itself(project: Sandbox, destination: str) -> None:
     with pytest.raises(ToolError, match="into itself"):
-        move(project, "src", "src/nested")
+        move(project, "src", destination)
+
+    assert (project.root / "src" / "main.py").is_file()  # nothing was half-done first
 
 
 def test_move_refuses_an_escaping_source(sandbox: Sandbox, outside_file: Path) -> None:
@@ -422,9 +425,24 @@ def test_refuses_to_copy_something_that_does_not_exist(sandbox: Sandbox) -> None
         copy(sandbox, "ghost.md", "elsewhere.md")
 
 
-def test_refuses_to_copy_a_directory_into_itself(project: Sandbox) -> None:
+@pytest.mark.parametrize("destination", ["src/nested", "src/deep/here"])
+def test_refuses_to_copy_a_directory_into_itself(project: Sandbox, destination: str) -> None:
+    """Both forms, because they fail in genuinely different ways without the guard.
+
+    'src/nested' is the harmless-looking one: `copytree` *succeeds* and silently leaves a
+    copy of src inside src. 'src/deep/here' is the dangerous one -- copytree walks into what
+    it is writing and raises RecursionError, which is neither an OSError (so copy's own
+    handler misses it) nor a HarnessError (so the agent loop will not turn it into an
+    observation). It would end the whole run. Parametrising keeps the second form covered;
+    it would otherwise be invisible, since the guard makes both raise the same ToolError.
+    """
     with pytest.raises(ToolError, match="into itself"):
-        copy(project, "src", "src/nested")
+        copy(project, "src", destination)
+
+    assert sorted(path.name for path in (project.root / "src").iterdir()) == [
+        "main.py",
+        "util.py",
+    ]
 
 
 def test_copy_refuses_an_escaping_source(sandbox: Sandbox, outside_file: Path) -> None:

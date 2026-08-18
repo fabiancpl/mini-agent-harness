@@ -125,16 +125,30 @@ def test_find_files_refuses_to_escape(sandbox: Sandbox, outside_file: Path) -> N
         find_files(sandbox, "*.txt", "../")
 
 
-def test_find_files_does_not_report_matches_reached_through_a_symlink(
+def test_find_files_does_not_descend_into_a_symlinked_directory(
     sandbox: Sandbox, tmp_path: Path
 ) -> None:
-    # A glob can walk into a symlinked directory; the results are filtered back through the
-    # sandbox so no path outside the root is ever named to the model.
     (tmp_path / "elsewhere").mkdir()
     (tmp_path / "elsewhere" / "secret.txt").write_text("nope\n", encoding="utf-8")
     (sandbox.root / "link").symlink_to(tmp_path / "elsewhere")
 
     assert "secret.txt" not in find_files(sandbox, "*.txt")
+
+
+def test_find_files_filters_out_a_symlink_to_a_file_outside_the_root(
+    sandbox: Sandbox, outside_file: Path
+) -> None:
+    """The case the containment filter actually exists for.
+
+    The test above passes for a reason that has nothing to do with our code: `rglob` simply
+    does not descend into symlinked directories. A symlink to a *file* is different -- rglob
+    yields it by name, so only the explicit `is_relative_to(sandbox.root)` check keeps a
+    path pointing outside the root from being named to the model. Remove that check and
+    this test is the one that fails.
+    """
+    (sandbox.root / "shortcut.txt").symlink_to(outside_file)
+
+    assert find_files(sandbox, "*.txt") == "No files matching '*.txt' under ."
 
 
 # --- search_text ----------------------------------------------------------------------------
@@ -257,7 +271,7 @@ def test_search_text_refuses_to_escape(sandbox: Sandbox, outside_file: Path) -> 
         search_text(sandbox, "secret", path="..")
 
 
-def test_search_text_does_not_read_through_a_symlink_out_of_the_root(
+def test_search_text_does_not_descend_into_a_symlinked_directory(
     sandbox: Sandbox, tmp_path: Path
 ) -> None:
     (tmp_path / "elsewhere").mkdir()
@@ -269,3 +283,22 @@ def test_search_text_does_not_read_through_a_symlink_out_of_the_root(
     # Neither the outside file's name nor a line of its contents may reach the model.
     assert "secret.txt" not in output
     assert "hunter2" not in output
+
+
+def test_search_text_will_not_read_a_symlink_to_a_file_outside_the_root(
+    sandbox: Sandbox, tmp_path: Path
+) -> None:
+    """The counterpart to the find_files case, and the one that reads real content.
+
+    A symlinked directory is skipped by `is_file()` before the containment check is even
+    reached, so that test proves nothing about the check. A symlink to a file *is* a file,
+    so `is_relative_to(sandbox.root)` is the only thing standing between the model and the
+    contents of an arbitrary file on the host.
+    """
+    (tmp_path / "outside_secrets.txt").write_text("swordfish is the password\n", encoding="utf-8")
+    (sandbox.root / "shortcut.txt").symlink_to(tmp_path / "outside_secrets.txt")
+
+    output = search_text(sandbox, "password")
+
+    assert "swordfish" not in output
+    assert "shortcut.txt" not in output
