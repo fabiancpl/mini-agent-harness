@@ -111,6 +111,12 @@ model to pick a free path. Deletion has no such case; it is destructive by defin
 there is no delete, remove, unlink, or shell tool anywhere, and the agent cannot be talked
 into one: a function that does not exist cannot be called.
 
+This applies to folders too. `create_directory`, `move`, and `copy` all work on them
+(`copy` recursively), and `list_directory`, `find_files`, and `search_text` explore them —
+but there is no `rmdir` and nothing that empties a directory. So **folders accumulate**: an
+agent that creates `a/b/c/d` leaves it there forever. That is the price of the invariant,
+and worth knowing before pointing one at a real project.
+
 The other three limits:
 
 - **It cannot leave the root folder.** Every path the model supplies is joined onto the

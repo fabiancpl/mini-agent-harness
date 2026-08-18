@@ -170,8 +170,19 @@ def _resolve_relocation(
             f"in place."
         )
 
-    # Moving a directory inside itself: rename fails with a bare EINVAL and copytree would
-    # recurse into what it is writing. Either way the model deserves a sentence, not errno.
+    # Putting a directory inside itself. The three things this prevents are all different:
+    #
+    #   move("src", "src/nested")        rename() fails with a bare EINVAL, "Invalid
+    #                                    argument", which tells the model nothing.
+    #   copy("src", "src/nested")        copytree *succeeds*, silently leaving a copy of
+    #                                    src inside src -- almost never what was meant.
+    #   copy("src", "src/deep/here")     copytree walks into what it is writing and dies
+    #                                    with RecursionError.
+    #
+    # That last one is why this check is load-bearing rather than cosmetic: RecursionError
+    # is not an OSError, so the handler below would not catch it, and it is not a
+    # HarnessError either, so the agent loop would not turn it into an observation. It
+    # would take down the whole run. Refusing up front keeps the failure recoverable.
     if source_path.is_dir() and destination_path.is_relative_to(source_path):
         raise ToolError(f"Cannot {verb} {source!r} into itself ({destination!r} is inside it).")
 

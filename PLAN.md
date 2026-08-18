@@ -162,6 +162,35 @@ an observation so the model can retry.
 the root (a relocation has two ends — checking only the source would be a hole); the source
 exists; **the destination does not exist**; and the destination is not inside the source.
 
+That last check is load-bearing, not cosmetic. `move("src", "src/nested")` fails with a bare
+`EINVAL`; `copy("src", "src/nested")` *succeeds*, silently leaving a copy of `src` inside
+itself; and `copy("src", "src/deep/here")` walks into what it is writing and raises
+`RecursionError` — which is neither an `OSError` (so `copy`'s handler misses it) nor a
+`HarnessError` (so the agent loop will not turn it into an observation), and would therefore
+take down the whole run. Refusing up front keeps all three recoverable.
+
+### Files and folders
+
+Six of the ten tools accept a directory: `list_directory`, `find_files`, `search_text` (as a
+search root — it only reads inside files, but walks folders recursively), `create_directory`,
+`move`, and `copy`. The four file-content tools — `read_file`, `write_file`,
+`append_to_file`, `edit_file` — refuse one, with an error naming the tool that does the job,
+so the model recovers in a single step rather than guessing.
+
+Two consequences worth stating plainly:
+
+- **Folders accumulate.** There is no `rmdir` and no tool that empties a directory, so an
+  agent that creates `a/b/c/d` leaves it there forever. This is the price of the invariant.
+- **`create_directory` is idempotent while `move`/`copy` hard-refuse an existing
+  destination.** Deliberate — re-creating a folder costs nothing and is not worth a step to
+  correct, whereas overwriting one destroys it — but the asymmetry is real and a reader will
+  notice it.
+
+`move` is also the one operation that can make a folder *name* disappear: after
+`move("docs", "guide")` a listing no longer shows `docs`. Nothing became unreachable — every
+file is under `guide/`, and `move("guide", "docs")` restores it exactly — but it is the
+exception to "paths are only ever added".
+
 **The invariant:** *no operation may make existing content unreachable.* Stated about
 effects rather than names, because `write_file` already overwrites — the promise is that
 nothing becomes **unrecoverable**. `move(a, b)` with `b` free is undone by `move(b, a)`;
