@@ -194,7 +194,9 @@ def test_built_tools_are_bound_to_the_sandbox(sandbox: Sandbox) -> None:
 # Note what is *not* here: 'rename' and 'move'. Relocating something preserves its content
 # and has an exact inverse, so it does not violate the invariant -- provided it refuses to
 # overwrite, which `test_relocation_tools_refuse_to_overwrite` below is what actually checks.
-FORBIDDEN_NAME_PARTS = ["delete", "remove", "rm", "unlink", "rmdir", "trash", "exec", "shell", "eval"]
+FORBIDDEN_NAME_PARTS = [
+    "delete", "remove", "rm", "unlink", "rmdir", "trash", "exec", "shell", "eval",
+]
 
 
 @pytest.mark.parametrize("forbidden", FORBIDDEN_NAME_PARTS)

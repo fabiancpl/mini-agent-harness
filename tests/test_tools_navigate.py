@@ -275,7 +275,8 @@ def test_search_text_does_not_descend_into_a_symlinked_directory(
     sandbox: Sandbox, tmp_path: Path
 ) -> None:
     (tmp_path / "elsewhere").mkdir()
-    (tmp_path / "elsewhere" / "secret.txt").write_text("hunter2 is the password\n", encoding="utf-8")
+    secret = tmp_path / "elsewhere" / "secret.txt"
+    secret.write_text("hunter2 is the password\n", encoding="utf-8")
     (sandbox.root / "link").symlink_to(tmp_path / "elsewhere")
 
     output = search_text(sandbox, "password")

@@ -212,7 +212,8 @@ def copy(sandbox: Sandbox, source: str, destination: str) -> str:
             # copytree refuses an existing destination by itself, which happens to be the
             # same rule _resolve_relocation just enforced.
             shutil.copytree(source_path, destination_path)
-            copied = plural(sum(1 for path in destination_path.rglob("*") if path.is_file()), "file")
+            files = sum(1 for path in destination_path.rglob("*") if path.is_file())
+            copied = plural(files, "file")
             detail = f" ({copied})"
         else:
             shutil.copy2(source_path, destination_path)  # copy2 keeps the modification time

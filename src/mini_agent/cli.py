@@ -17,8 +17,8 @@ from .agent import Agent, AgentResult, Step
 from .config import Config, LLMConfig, load_config
 from .errors import ConfigError, HarnessError
 from .llm import LLMClient, SupportsComplete
-from .tools import build_registry
 from .sandbox import Sandbox
+from .tools import build_registry
 
 DEFAULT_CONFIG_PATH = "config.yaml"
 #: Observations are trimmed on screen only. The model always sees the whole thing.

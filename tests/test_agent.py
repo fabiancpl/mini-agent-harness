@@ -8,13 +8,14 @@ sandbox, so these double as end-to-end tests of everything below the network.
 from __future__ import annotations
 
 import pytest
-from conftest import FakeLLMClient, acts, answer  # pytest puts tests/ on sys.path
 
 from mini_agent.agent import DEFAULT_SYSTEM_PROMPT, Agent, Step
 from mini_agent.errors import LLMError
 from mini_agent.registry import ToolRegistry
 from mini_agent.sandbox import Sandbox
 from mini_agent.tools import build_registry
+
+from conftest import FakeLLMClient, acts, answer  # pytest puts tests/ on sys.path
 
 
 @pytest.fixture
@@ -102,7 +103,10 @@ def test_the_tools_compose_into_a_safe_refactor(registry: ToolRegistry, sandbox:
     agent, _ = make_agent(
         [
             acts("Where is it?", ("search_text", {"pattern": "hello"})),
-            acts("Back it up first.", ("copy", {"source": "notes.txt", "destination": "notes.bak"})),
+            acts(
+                "Back it up first.",
+                ("copy", {"source": "notes.txt", "destination": "notes.bak"}),
+            ),
             acts(
                 "Now change it.",
                 ("edit_file", {"path": "notes.txt", "old_text": "hello", "new_text": "goodbye"}),
@@ -120,7 +124,9 @@ def test_the_tools_compose_into_a_safe_refactor(registry: ToolRegistry, sandbox:
     assert not any(observation.failed for step in result.steps for observation in step.observations)
 
 
-def test_a_refused_overwrite_becomes_an_observation(registry: ToolRegistry, sandbox: Sandbox) -> None:
+def test_a_refused_overwrite_becomes_an_observation(
+    registry: ToolRegistry, sandbox: Sandbox
+) -> None:
     # The model tries to clobber a file, is refused, and adapts -- the run survives and the
     # file it aimed at is still there.
     (sandbox.root / "keep.txt").write_text("precious\n", encoding="utf-8")

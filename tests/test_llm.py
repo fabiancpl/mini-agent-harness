@@ -181,7 +181,8 @@ def test_parses_empty_arguments(post) -> None:
 
 def test_accepts_arguments_sent_as_an_object(post) -> None:
     # Off-spec, but several local servers do it. Accepting it costs one isinstance check.
-    call = {"id": "c", "type": "function", "function": {"name": "read_file", "arguments": {"path": "a"}}}
+    function = {"name": "read_file", "arguments": {"path": "a"}}
+    call = {"id": "c", "type": "function", "function": function}
     post.response = FakeResponse(chat_response(None, [call]))
 
     assert LLMClient(CONFIG).complete([]).tool_calls[0].arguments == {"path": "a"}
@@ -242,7 +243,8 @@ def test_reports_arguments_that_are_not_an_object(post) -> None:
 
 
 def test_reports_a_tool_call_without_a_name(post) -> None:
-    post.response = FakeResponse(chat_response(None, [{"id": "c", "function": {"arguments": "{}"}}]))
+    raw_call = {"id": "c", "function": {"arguments": "{}"}}
+    post.response = FakeResponse(chat_response(None, [raw_call]))
 
     with pytest.raises(LLMError, match="no function name"):
         LLMClient(CONFIG).complete([])

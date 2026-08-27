@@ -14,6 +14,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "ruff>=0.6",
 ]
 
 [project.scripts]
@@ -36,3 +37,23 @@ addopts = "-q"
 # beats a sys.path insert inside a test module.
 pythonpath = ["examples", "evals"]
 
+[tool.ruff]
+# Ruff enforces the conventions CLAUDE.md already documents; it adds no runtime dependency
+# and nothing here is a new rule, only a written-down one made checkable.
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Deliberately narrow: pycodestyle errors, pyflakes, and import order. Anything broader
+# starts arguing with the house style instead of enforcing it. Pyflakes alone earns its
+# keep -- it found a duplicated test name that had been silently shadowing another test.
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mini_agent"]
+# tests/ and examples/ are on the path via `pythonpath`, not installed, so tell isort that
+# rather than letting it shuffle them in with third-party imports.
+known-local-folder = ["conftest", "word_count_tool", "run_eval"]
+
+[tool.ruff.format]
+quote-style = "double"

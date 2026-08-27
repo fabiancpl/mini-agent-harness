@@ -12,9 +12,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import FakeLLMClient, acts, answer  # pytest puts tests/ on sys.path
 
 from mini_agent.cli import build_parser, main
+
+from conftest import FakeLLMClient, acts, answer  # pytest puts tests/ on sys.path
 
 # --- helpers --------------------------------------------------------------------------------
 
@@ -46,7 +47,8 @@ def test_defaults() -> None:
 
 def test_parses_every_flag() -> None:
     args = build_parser().parse_args(
-        ["--config", "c.yaml", "--task", "do it", "--root", "/tmp/w", "--max-steps", "3", "--verbose"]
+        ["--config", "c.yaml", "--task", "do it", "--root", "/tmp/w",
+         "--max-steps", "3", "--verbose"]
     )
 
     assert (args.config, args.task, args.root, args.max_steps) == ("c.yaml", "do it", "/tmp/w", 3)
@@ -281,7 +283,10 @@ def test_an_llm_failure_during_a_run_exits_one(cli_config: Path, capsys) -> None
         def complete(self, messages, tools=None):
             raise LLMError("endpoint is down")
 
-    code = main(["--config", str(cli_config), "--task", "hi"], llm_factory=lambda config: BrokenClient())
+    code = main(
+        ["--config", str(cli_config), "--task", "hi"],
+        llm_factory=lambda config: BrokenClient(),
+    )
 
     assert code == 1
     assert "endpoint is down" in capsys.readouterr().err
@@ -400,7 +405,8 @@ def test_the_module_is_runnable_with_python_dash_m() -> None:
 
 def test_a_missing_config_exits_one_from_the_real_entry_point(tmp_path: Path) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "mini_agent", "--config", str(tmp_path / "nope.yaml"), "--task", "x"],
+        [sys.executable, "-m", "mini_agent",
+         "--config", str(tmp_path / "nope.yaml"), "--task", "x"],
         capture_output=True,
         text=True,
     )
