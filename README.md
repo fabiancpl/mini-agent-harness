@@ -277,6 +277,7 @@ project. See `sandbox.py` and the docstring at the top of `tools/write.py` for t
 | `tests/` | One test module per source module |
 | `examples/offline_demo.py` | The whole stack over a real socket, with no API key |
 | `TESTING.md` | Test layers, what "end-to-end" means for an agent, why evals stay out of the suite |
+| `CHANGELOG.md` | What each release contains, and the known limitations of the current one |
 
 ## Where to take it next
 
