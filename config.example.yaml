@@ -33,10 +33,22 @@ agent:
   system_prompt_file: null
 
 tools:
-  # Which registered tools this agent may use, in the order they are advertised to the
-  # model. Removing a name here removes the capability entirely; delete the whole section
-  # to enable every registered tool. Listing only the first four gives you a read-only
-  # agent that can explore and explain but never touch anything.
+  # With `enabled` left commented out, every registered tool is available. That is the
+  # default on purpose: a tool you add in tools/build_registry then works immediately,
+  # with no second place to remember to edit.
+  #
+  # Uncomment it to restrict the agent. The list is a strict allow-list, and both halves
+  # of that matter:
+  #
+  #   * a name that is not registered is an error, so a typo is caught at startup;
+  #   * a tool that IS registered but is NOT listed here is simply not loaded -- silently,
+  #     because an allow-list you wrote deliberately should not nag you about the tools you
+  #     left out. So if you add a tool and cannot see it, check this list first. The startup
+  #     banner prints "N of M registered" whenever a list is active, to make that visible.
+  #
+  # The order given is the order the tools are advertised to the model. Listing only the
+  # first four gives you a read-only agent that can explore and explain but never touch
+  # anything.
   #
   # Note what is missing and cannot be added: there is no delete, remove, unlink, or shell
   # tool anywhere in the registry. The agent cannot destroy your files because that ability
@@ -46,14 +58,15 @@ tools:
   # existing destination, so content is always preserved and every relocation can be
   # undone. That is the line this project draws -- no operation may make existing content
   # unreachable.
-  enabled:
-    - list_directory
-    - find_files
-    - search_text
-    - read_file
-    - create_directory
-    - write_file
-    - append_to_file
-    - edit_file
-    - move
-    - copy
+  #
+  # enabled:
+  #   - list_directory
+  #   - find_files
+  #   - search_text
+  #   - read_file
+  #   - create_directory
+  #   - write_file
+  #   - append_to_file
+  #   - edit_file
+  #   - move
+  #   - copy

@@ -6,12 +6,15 @@ The theme: every mistake a reader could plausibly make in the YAML file produces
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
 from mini_agent.config import load_config
 from mini_agent.errors import ConfigError
+from mini_agent.sandbox import Sandbox
+from mini_agent.tools import build_registry
 
 from conftest import API_KEY_ENV, base_config  # pytest puts tests/ on sys.path
 
@@ -59,15 +62,33 @@ def test_strips_a_trailing_slash_from_base_url(write_config) -> None:
     assert load_config(write_config(data)).llm.base_url == "https://example.test/v1"
 
 
+EXAMPLE_CONFIG = Path(__file__).resolve().parent.parent / "config.example.yaml"
+
+
 def test_the_shipped_example_config_is_valid(monkeypatch: pytest.MonkeyPatch) -> None:
     # config.example.yaml is the first thing a reader copies; it must actually load.
     monkeypatch.setenv("OPENAI_API_KEY", "sk-example")
-    example = Path(__file__).resolve().parent.parent / "config.example.yaml"
 
-    config = load_config(example)
+    config = load_config(EXAMPLE_CONFIG)
 
-    assert config.enabled_tools is not None
+    # `tools.enabled` ships commented out, so a copied config enables every registered
+    # tool and a tool the reader adds appears without a second edit. An explicit list here
+    # used to silently drop newly written tools, which is the trap this prevents.
+    assert config.enabled_tools is None
     assert config.agent.root_path.is_dir()
+
+
+def test_the_commented_allow_list_in_the_example_names_only_real_tools(tmp_path: Path) -> None:
+    """The commented-out `enabled:` block is documentation, and documentation rots.
+
+    A reader uncommenting it must get a config that loads, so the names are checked against
+    the real registry instead of being trusted to have stayed in step with it.
+    """
+    commented = re.findall(r"^\s*#\s+- (\w+)$", EXAMPLE_CONFIG.read_text(), flags=re.MULTILINE)
+    registered = build_registry(Sandbox(tmp_path)).names()
+
+    assert commented, "the example should still document the allow-list it explains"
+    assert commented == registered
 
 
 # --- the API key comes from the environment, never from the file --------------------------

@@ -69,6 +69,10 @@ def main(
         config = _apply_overrides(load_config(args.config), args)
         sandbox = Sandbox(config.agent.root_path)
         registry = build_registry(sandbox, config.enabled_tools)
+        # Built a second time with no allow-list, only to count what *could* have been
+        # enabled. It constructs dataclasses and touches no filesystem, and two obvious
+        # lines beat threading a count back out of build_registry.
+        total_registered = len(build_registry(sandbox))
     except HarnessError as exc:
         # Configuration problems get one clear line, never a traceback: a stack trace tells
         # the reader about our code when the mistake is in their file.
@@ -83,7 +87,7 @@ def main(
         on_step=lambda step: _print_step(step, verbose=args.verbose),
     )
 
-    _print_banner(config, registry.names())
+    _print_banner(config, registry.names(), total_registered)
     if args.task:
         return _run_once(agent, args.task)
     return _repl(agent)
@@ -137,10 +141,15 @@ def _repl(agent: Agent) -> int:
 # --- printing --------------------------------------------------------------------------------
 
 
-def _print_banner(config: Config, tool_names: list[str]) -> None:
+def _print_banner(config: Config, tool_names: list[str], total_registered: int) -> None:
     print(f"workspace: {config.agent.root_path}")
     print(f"model:     {config.llm.model} at {config.llm.base_url}")
-    print(f"tools:     {', '.join(tool_names)}")
+    # When tools.enabled is trimming the registry, say so. A tool you registered but forgot
+    # to add to the allow-list is otherwise invisible, and that is the easiest mistake to
+    # make when extending the harness.
+    trimmed = len(tool_names) < total_registered
+    count = f"{len(tool_names)} of {total_registered} registered — " if trimmed else ""
+    print(f"tools:     {count}{', '.join(tool_names)}")
     print()
 
 

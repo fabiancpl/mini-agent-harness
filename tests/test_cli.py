@@ -233,8 +233,19 @@ def test_the_tools_allow_list_from_the_config_is_applied(write_config, capsys) -
     main(["--config", str(write_config(data)), "--task", "hi"], llm_factory=fake_llm(answer("hi")))
 
     output = capsys.readouterr().out
-    assert "tools:     list_directory\n" in output
+    # The count is the point: a tool you registered but left out of the allow-list is
+    # otherwise invisible, which is the trap this banner exists to spring.
+    assert "tools:     1 of 10 registered — list_directory\n" in output
     assert "write_file" not in output
+
+
+def test_the_banner_omits_the_count_when_every_tool_is_enabled(write_config, capsys) -> None:
+    # No allow-list means nothing is being withheld, so "10 of 10" would be noise.
+    main(["--config", str(write_config()), "--task", "hi"], llm_factory=fake_llm(answer("hi")))
+
+    output = capsys.readouterr().out
+    assert "tools:     list_directory" in output
+    assert "registered" not in output
 
 
 # --- configuration errors ------------------------------------------------------------------------
