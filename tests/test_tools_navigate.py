@@ -96,7 +96,7 @@ def test_searches_only_under_the_given_path(populated: Sandbox) -> None:
     assert "No files matching" in find_files(populated, "*.md", "src")
 
 
-def test_reports_no_matches_clearly(populated: Sandbox) -> None:
+def test_reports_no_matching_files_clearly(populated: Sandbox) -> None:
     assert find_files(populated, "*.rs") == "No files matching '*.rs' under ."
 
 
@@ -182,7 +182,7 @@ def test_finds_matches_across_several_files(sources: Sandbox) -> None:
     ]
 
 
-def test_reports_no_matches_clearly(sources: Sandbox) -> None:
+def test_reports_no_matching_lines_clearly(sources: Sandbox) -> None:
     assert search_text(sources, "nonexistent") == "No matches for 'nonexistent' under ."
 
 
