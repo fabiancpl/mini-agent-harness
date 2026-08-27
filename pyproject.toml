@@ -27,5 +27,11 @@ build-backend = "hatchling.build"
 packages = ["src/mini_agent"]
 
 [tool.pytest.ini_options]
+# `testpaths` is also what keeps evals/ out of the suite: `pytest` collects tests/ only,
+# so nobody running the tests is ever billed by a real provider. See TESTING.md.
 testpaths = ["tests"]
 addopts = "-q"
+# examples/ holds the EXTENDING.md walkthrough tool, which is tested like any other tool.
+# Declaring the path here beats a sys.path insert inside a test module.
+pythonpath = ["examples"]
+

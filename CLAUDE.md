@@ -60,7 +60,13 @@ in isolation.
 | `agent.py` | The ReAct loop: think → call tool → observe → repeat, until a final answer or `max_steps`. |
 | `cli.py` | Argument parsing, the REPL, and printing the trace. No business logic. |
 
-See `PLAN.md` for the full design, tool contracts, and the implementation checklist.
+See `PLAN.md` for the full design, tool contracts, and the implementation checklist, and
+`EXTENDING.md` for the tool contract as a walkthrough — that is the file to point a
+contributor at before they add anything.
+
+Two directories sit outside the package and are not imported by it: `examples/` (the offline
+demo, and the `EXTENDING.md` walkthrough tool, which is deliberately **not** registered) and
+`evals/` (opt-in measurement against a real model, never collected by pytest).
 
 ## Invariants — do not break these
 
@@ -106,6 +112,7 @@ behaviour here, the tests must be updated deliberately, never "fixed" to pass.
   `requests.post`; `agent.py` is tested with a scripted fake client.
 - Every test names the behaviour it protects: `test_read_file_rejects_parent_traversal`.
 - New tool ⇒ new test module covering the happy path, an input error, and an escape attempt.
+  `EXTENDING.md` walks through all three; `tests/test_word_count_example.py` is the template.
 - **Adding a test for a guard? Delete the guard and confirm the test fails.** Three guards
   here sat at 100% coverage while the case they exist for never ran — see the warning at the
   end of `TESTING.md`.
