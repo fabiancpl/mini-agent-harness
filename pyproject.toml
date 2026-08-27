@@ -31,7 +31,8 @@ packages = ["src/mini_agent"]
 # so nobody running the tests is ever billed by a real provider. See TESTING.md.
 testpaths = ["tests"]
 addopts = "-q"
-# examples/ holds the EXTENDING.md walkthrough tool, which is tested like any other tool.
-# Declaring the path here beats a sys.path insert inside a test module.
-pythonpath = ["examples"]
+# examples/ holds the EXTENDING.md walkthrough tool, and evals/ holds the eval *checkers*,
+# which are unit-tested even though the evals themselves never run here. Declaring the paths
+# beats a sys.path insert inside a test module.
+pythonpath = ["examples", "evals"]
 
