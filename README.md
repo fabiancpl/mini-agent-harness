@@ -32,6 +32,8 @@ obvious code over clever code, and explains its design decisions in comments.
 
 [`PLAN.md`](PLAN.md) is the design document, [`CLAUDE.md`](CLAUDE.md) holds the invariants
 and conventions; [`TESTING.md`](TESTING.md) the unit test and e2e testing strategy.
+**[`EXTENDING.md`](EXTENDING.md) is where to go once you want to change something** — adding
+a tool, swapping the model client, and which lines not to cross.
 
 ## Quickstart — no API key needed
 
@@ -60,7 +62,8 @@ conversation and is meant to be read.
 $ python -m mini_agent --task "Summarise the workspace, then try to read /etc/passwd"
 workspace: /home/you/mini-agent-harness/workspace
 model:     gpt-4o-mini at https://api.openai.com/v1
-tools:     list_directory, find_files, read_file, create_directory, write_file, edit_file
+tools:     list_directory, find_files, search_text, read_file, create_directory,
+           write_file, append_to_file, edit_file, move, copy
 
   - [1] list_directory(path='.')
   - [2] write_file(path='summary.md', content='# Summary\n\nOne file: hello.txt\n')
@@ -109,7 +112,13 @@ python -m mini_agent --task "list the files here and tell me what this workspace
 python -m mini_agent                      # interactive REPL
 python -m mini_agent --verbose            # show reasoning and full observations
 python -m mini_agent --root ./sandbox     # override the workspace for one run
+python -m mini_agent --task "…" --dump-transcript run.json   # the raw conversation
 ```
+
+`--dump-transcript` writes the exact messages the API saw — system prompt, every assistant
+turn with its tool calls, every tool result. Reading one is the fastest way to stop thinking
+of an agent as magic: it is a list of dictionaries and a `for` loop. From code, the same
+thing is `result.messages`.
 
 ### What the agent remembers
 
@@ -183,7 +192,7 @@ copying it. Two things in it are load-bearing:
 | `agent.max_steps` | Hard bound on the loop, and your cost ceiling. 12 is generous for small tasks |
 | `agent.root_path` | The sandbox. Relative paths resolve against `config.yaml`, not your shell |
 | `llm.temperature` | `0.0` keeps tool calling deterministic and debuggable |
-| `tools.enabled` | Delete the whole section for every tool; list only the first four for a **read-only agent** that can explore and explain but never touch anything |
+| `tools.enabled` | Ships commented out, which enables every registered tool. Uncomment it for a strict allow-list — the first four alone give you a **read-only agent** that can explore and explain but never touch anything. A tool you register but leave off the list is not loaded; the banner prints `10 of 11 registered` when that is happening |
 
 ### When something goes wrong
 
@@ -276,10 +285,17 @@ project. See `sandbox.py` and the docstring at the top of `tools/write.py` for t
 | `src/mini_agent/cli.py` | Argument parsing and the REPL |
 | `tests/` | One test module per source module |
 | `examples/offline_demo.py` | The whole stack over a real socket, with no API key |
+| `examples/word_count_tool.py` | The `EXTENDING.md` walkthrough, as real tested code |
+| `evals/run_eval.py` | Opt-in measurement against a real model. Never run by `pytest` |
+| `EXTENDING.md` | Adding a tool, swapping the model client, and the lines not to cross |
 | `TESTING.md` | Test layers, what "end-to-end" means for an agent, why evals stay out of the suite |
 | `CHANGELOG.md` | What each release contains, and the known limitations of the current one |
 
 ## Where to take it next
+
+**[`EXTENDING.md`](EXTENDING.md) is the practical guide** — the tool contract, a worked
+example you can copy, how to swap the model client, and the one invariant you must not break.
+Start there.
 
 Good exercises once you have read the code: add a confirmation prompt before writes; add a
 `trash` tool that moves into `.trash/` instead of deleting, and make the search tools ignore
@@ -289,6 +305,9 @@ instead of inside `run`, add a `reset` command, then solve the context-growth pr
 appears immediately; stream the model's tokens; add
 retries with backoff; give the agent a sub-agent for read-only exploration; expose the same
 tools over MCP.
+
+That third one stays an exercise on purpose. `result.messages` will show you what a run sent;
+making the *next* run start from it is where the real problem begins.
 
 ## License
 

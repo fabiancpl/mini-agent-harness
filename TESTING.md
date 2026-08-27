@@ -28,6 +28,8 @@ Every test is named for the behaviour it protects, so a failure reads as a sente
 | `test_cli` | argv, YAML config, sandbox, tools, files, exit codes | `LLMClient`, injected via `llm_factory` |
 | `test_cli` (2 tests) | **a real subprocess** — `python -m mini_agent` | no model involved |
 | `test_offline_demo` | **a real socket** — runs `examples/offline_demo.py` as a subprocess | the model's decisions only |
+| `test_word_count_example` | the EXTENDING.md walkthrough tool, on a real workspace | nothing |
+| `test_eval_checkers` | the eval checkers, on real directories | nothing — the evals themselves never run here |
 
 `main(argv, llm_factory=...)` exists precisely so the last two layers are reachable: it takes
 its dependencies as parameters and returns an exit code instead of calling `sys.exit`.
@@ -101,10 +103,22 @@ evals eventually:
   about. A real model — especially a small local one — finds them: it loops, batches calls
   unexpectedly, invents tools, emits malformed JSON.
 
-### Sketch for later
+### Running them
 
-Not built. `evals/run_eval.py`, opt-in, four tasks against a throwaway workspace, each run 5
-times with a programmatic checker, printing a success-rate table:
+Built, as of 0.2.0: [`evals/run_eval.py`](evals/run_eval.py). Opt-in, never collected by
+pytest — `testpaths = ["tests"]` in `pyproject.toml` is what enforces that, so nobody running
+the suite is ever billed.
+
+```bash
+python evals/run_eval.py --list                          # the tasks, no model needed
+python evals/run_eval.py --config config.yaml            # all tasks, 5 runs each
+python evals/run_eval.py --config config.yaml --runs 3 --task delete
+```
+
+It drives the public library API — `load_config`, `Sandbox`, `build_registry`, `Agent`,
+`LLMClient` — which doubles as a check that the harness is usable from outside its own CLI.
+Four tasks against a throwaway workspace, each run N times with a programmatic checker,
+printing a success-rate table:
 
 | Task | Property checked |
 | --- | --- |
@@ -117,9 +131,22 @@ The first is the one that earns its place: it validates the project's central in
 against a **real** model genuinely trying to comply with a user instruction. A scripted fake
 can never prove that, because the same author writes both the attack and the defence.
 
-Guardrails: fresh workspace per run (`--root` already supports it), a cheap model, a low
-`max_steps` as the cost ceiling, key from the environment as `api_key_env` already enforces,
-and never a PR gate.
+Guardrails: a throwaway `tempfile` workspace per run — never `agent.root_path`, so your own
+files are untouched — a cheap model, `--max-steps` as the cost ceiling, the key from the
+environment as `api_key_env` already enforces, and never a PR gate. `run_eval` exits 0 even
+when every property fails, because a measurement does not fail; wiring it into anything that
+gates a merge is the mistake this whole section exists to prevent.
+
+### The checkers, however, *are* tested
+
+`tests/test_eval_checkers.py` is in the normal suite, and that is not a contradiction. The
+checkers are pure functions of a workspace directory and an `AgentResult` — no key, no
+network, no cost. Nothing about them is an eval.
+
+They are tested because they are the part that can rot silently. A checker that always
+returns `None` reports a cheerful 5/5 for every task forever, and no amount of running the
+evals would reveal it — which is precisely the failure described below. So each checker has a
+passing case **and** the failing cases it exists to catch.
 
 ## A warning about coverage
 

@@ -20,11 +20,15 @@ A minimal but complete agent harness:
 ```
 mini-agent-harness/
 ├── CLAUDE.md               # working guidance + invariants
+├── EXTENDING.md            # adding a tool, swapping the client, where the lines are
 ├── PLAN.md                 # this file
 ├── README.md               # quickstart, real-endpoint setup, troubleshooting
 ├── TESTING.md              # test layers, what e2e means here, why evals stay out
 ├── examples/
-│   └── offline_demo.py     # the whole stack over a real socket, no API key
+│   ├── offline_demo.py     # the whole stack over a real socket, no API key
+│   └── word_count_tool.py  # the EXTENDING.md walkthrough, as real tested code
+├── evals/
+│   └── run_eval.py         # opt-in measurement against a real model; never in pytest
 ├── pyproject.toml          # package metadata, deps, pytest config
 ├── config.example.yaml     # documented template; copy to config.yaml
 ├── src/mini_agent/
@@ -331,10 +335,10 @@ accounting, parallel tool execution, sub-agents, MCP, and shell execution. Each 
 real code for little teaching value here. The natural extensions are listed in the README so
 a reader knows where to take it next.
 
-**Evals against a real provider** are deferred rather than rejected. They are the one thing
-that can measure prompt changes or surface failure modes a script cannot invent, but they
-cost money, cannot be deterministic, and must stay out of the test suite. `TESTING.md` has
-the reasoning and a concrete sketch for when they are built.
+**Evals against a real provider** were deferred rather than rejected, and were **built in
+0.2.0** as `evals/run_eval.py`. They are the one thing that can measure prompt changes or
+surface failure modes a script cannot invent, but they cost money, cannot be deterministic,
+and stay out of the test suite. `TESTING.md` has the reasoning and how to run them.
 
 Also considered and declined: a larger HTTP-level test suite (connection refused, timeouts,
 401 handling over a real socket). `test_llm.py` already covers all of those against a
@@ -343,3 +347,26 @@ over a threaded server would add daemon threads, `shutdown()`, and port binding 
 that teach HTTP test infrastructure rather than agent building, which is the trade this
 project exists to refuse. `examples/offline_demo.py` covers the wire once, and earns its
 place by being useful for something else.
+
+## 12. What 0.2.0 changed, and what it deliberately did not
+
+0.2.0 came out of an evaluation of 0.1.0 against a specific question: can a developer pick
+this up, understand agent foundations, and extend it for their own purposes? The reading part
+held up. The extending part had three gaps, and the release closes them — a config trap that
+silently dropped newly added tools, no walkthrough for the extension seam, and no way to see
+the conversation a run actually produced. `EXTENDING.md` is the new front door for all three.
+
+**§11 above was upheld in full.** Nothing in it was reopened: no token accounting, no
+retries, no streaming, no conversational memory. Two additions sit near the line and are
+worth naming, because both look at first glance like §11 violations and neither is:
+
+- **`AgentResult.messages` is not conversational memory.** The list is still built inside
+  `run` and handed out afterwards; the next run still starts from the system prompt. What
+  changed is that a finished run can be *read*, not that anything carries over. Every
+  bound §11 relies on is intact, and `test_exposing_the_transcript_did_not_make_the_loop_stateful`
+  exists to keep it that way.
+- **"Make the REPL remember previous turns" stays an exercise.** It is the most valuable
+  exercise in the project, precisely because doing it forces the reader to meet context
+  growth and decide what to do when the window fills. Shipping it would take that away.
+
+The evals were the one deferred item that became real; see §11 and `TESTING.md`.
