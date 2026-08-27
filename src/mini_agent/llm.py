@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import requests
 
@@ -55,6 +55,24 @@ class Message:
                 for call in self.tool_calls
             ]
         return entry
+
+
+class SupportsComplete(Protocol):
+    """Everything the agent needs from a model client: one method.
+
+    `Agent` is annotated with this rather than with `LLMClient`, which makes the seam
+    visible in the types -- swapping in another backend means writing one `complete`, not
+    subclassing anything. The test suite has always relied on this (`FakeLLMClient` is not
+    an `LLMClient`); the protocol just stops that from being a secret.
+
+    Note the boundary honestly: `messages` are OpenAI-shaped dicts, and `Agent.run` builds
+    them itself. A provider with a different message shape needs edits to the loop as well
+    as a new client -- see EXTENDING.md.
+    """
+
+    def complete(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
+    ) -> Message: ...
 
 
 class LLMClient:

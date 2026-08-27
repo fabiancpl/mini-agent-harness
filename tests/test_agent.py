@@ -369,3 +369,63 @@ def test_the_loop_itself_prints_nothing(registry: ToolRegistry, capsys) -> None:
     agent.run("task")
 
     assert capsys.readouterr().out == ""
+
+
+# --- the transcript ---------------------------------------------------------------------------
+
+
+def test_the_result_carries_the_whole_conversation(registry: ToolRegistry) -> None:
+    agent, _ = make_agent(
+        [acts("Looking.", ("list_directory", {})), answer("All done.")], registry
+    )
+
+    result = agent.run("what is here?")
+
+    assert [message["role"] for message in result.messages] == [
+        "system",
+        "user",
+        "assistant",  # the thought plus the tool call
+        "tool",  # the observation
+        "assistant",  # the final answer
+    ]
+    assert result.messages[0]["content"] == DEFAULT_SYSTEM_PROMPT
+    assert result.messages[1]["content"] == "what is here?"
+    assert result.messages[-1]["content"] == "All done."
+
+
+def test_the_transcript_is_what_the_client_was_actually_sent(registry: ToolRegistry) -> None:
+    """The point of exposing it is fidelity, so check it against the client's own record."""
+    agent, llm = make_agent(
+        [acts("Looking.", ("list_directory", {})), answer("All done.")], registry
+    )
+
+    result = agent.run("task")
+
+    # The last request carried everything except the answer that ended the run.
+    assert list(result.messages[:-1]) == llm.received[-1]
+
+
+def test_the_transcript_survives_running_out_of_steps(registry: ToolRegistry) -> None:
+    # This is the run you most want to read afterwards, so it must not come back empty.
+    agent, _ = make_agent([acts("Again.", ("list_directory", {}))] * 3, registry, max_steps=3)
+
+    result = agent.run("task")
+
+    assert result.stopped_early
+    assert [message["role"] for message in result.messages] == [
+        "system", "user",
+        "assistant", "tool",
+        "assistant", "tool",
+        "assistant", "tool",
+    ]
+
+
+def test_exposing_the_transcript_did_not_make_the_loop_stateful(registry: ToolRegistry) -> None:
+    """Each run must still start from the system prompt -- PLAN.md §11 depends on it."""
+    agent, _ = make_agent([answer("first"), answer("second")], registry)
+
+    first = agent.run("one")
+    second = agent.run("two")
+
+    assert [message["content"] for message in second.messages[1:]] == ["two", "second"]
+    assert len(second.messages) == len(first.messages)

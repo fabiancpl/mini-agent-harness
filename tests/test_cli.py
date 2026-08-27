@@ -6,6 +6,7 @@ included -- runs inside a test with a scripted model and no network.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -430,3 +431,45 @@ def test_the_repl_keeps_conversations_independent(
 
     assert client.received[1][1] == {"role": "user", "content": "second"}
     assert len(client.received[1]) == 2  # system + user only
+
+
+# --- --dump-transcript -------------------------------------------------------------------------
+
+
+def test_dump_transcript_writes_the_conversation_as_json(
+    cli_config: Path, tmp_path: Path, capsys
+) -> None:
+    destination = tmp_path / "transcript.json"
+
+    code = main(
+        ["--config", str(cli_config), "--task", "look", "--dump-transcript", str(destination)],
+        llm_factory=fake_llm(acts("Looking.", ("list_directory", {})), answer("Done.")),
+    )
+
+    assert code == 0
+    transcript = json.loads(destination.read_text(encoding="utf-8"))
+    assert [message["role"] for message in transcript] == [
+        "system", "user", "assistant", "tool", "assistant"
+    ]
+    # The tool result must carry the id of the call it answers, or the API rejects the turn.
+    assert transcript[3]["tool_call_id"] == transcript[2]["tool_calls"][0]["id"]
+    assert f"(transcript written to {destination})" in capsys.readouterr().out
+
+
+def test_no_transcript_is_written_without_the_flag(cli_config: Path, tmp_path: Path) -> None:
+    main(["--config", str(cli_config), "--task", "look"], llm_factory=fake_llm(answer("Done.")))
+
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_an_unwritable_transcript_path_does_not_lose_the_run(cli_config: Path, capsys) -> None:
+    # The answer is already on screen; a failed dump must not turn a good run into an error.
+    code = main(
+        ["--config", str(cli_config), "--task", "look", "--dump-transcript", "/nope/t.json"],
+        llm_factory=fake_llm(answer("Done.")),
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "Done." in captured.out
+    assert "could not write transcript" in captured.err

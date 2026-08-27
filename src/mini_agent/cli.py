@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -15,7 +16,7 @@ from pathlib import Path
 from .agent import Agent, AgentResult, Step
 from .config import Config, LLMConfig, load_config
 from .errors import ConfigError, HarnessError
-from .llm import LLMClient
+from .llm import LLMClient, SupportsComplete
 from .tools import build_registry
 from .sandbox import Sandbox
 
@@ -50,18 +51,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="show each step's reasoning, tool arguments, and observation",
     )
+    parser.add_argument(
+        "--dump-transcript",
+        metavar="PATH",
+        help="write the exact messages exchanged with the model to PATH as JSON",
+    )
     return parser
 
 
 def main(
     argv: list[str] | None = None,
     *,
-    llm_factory: Callable[[LLMConfig], object] = LLMClient,
+    llm_factory: Callable[[LLMConfig], SupportsComplete] = LLMClient,
 ) -> int:
     """Entry point. Returns a process exit code instead of calling sys.exit.
 
     `llm_factory` exists so the tests can drive the whole CLI with a scripted fake client
-    and never touch the network. Production always uses the default.
+    and never touch the network. Production always uses the default. Its return type is the
+    `SupportsComplete` protocol rather than `LLMClient`, which is what says out loud that
+    any object with a matching `complete` will do.
     """
     args = build_parser().parse_args(argv)
 
@@ -89,8 +97,8 @@ def main(
 
     _print_banner(config, registry.names(), total_registered)
     if args.task:
-        return _run_once(agent, args.task)
-    return _repl(agent)
+        return _run_once(agent, args.task, args.dump_transcript)
+    return _repl(agent, args.dump_transcript)
 
 
 def run() -> None:
@@ -101,18 +109,19 @@ def run() -> None:
 # --- the two modes --------------------------------------------------------------------------
 
 
-def _run_once(agent: Agent, task: str) -> int:
+def _run_once(agent: Agent, task: str, dump_path: str | None = None) -> int:
     try:
         result = agent.run(task)
     except HarnessError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
     _print_result(result)
+    _dump_transcript(result, dump_path)
     # Running out of steps is a failure: scripts calling this should be able to tell.
     return EXIT_ERROR if result.stopped_early else EXIT_OK
 
 
-def _repl(agent: Agent) -> int:
+def _repl(agent: Agent, dump_path: str | None = None) -> int:
     # Say up front that turns are independent. It is the first thing people are surprised
     # by, and the surprise is much cheaper to prevent here than to explain afterwards.
     print("Type a task, or 'exit' to quit.")
@@ -130,7 +139,11 @@ def _repl(agent: Agent) -> int:
             return EXIT_OK
 
         try:
-            _print_result(agent.run(task))
+            result = agent.run(task)
+            _print_result(result)
+            # Each turn is a separate conversation, so each turn overwrites the file. There
+            # is no combined transcript to write: there was never a combined conversation.
+            _dump_transcript(result, dump_path)
         except KeyboardInterrupt:
             # Ctrl-C abandons the current run but keeps the session alive.
             print("\n(interrupted)\n")
@@ -151,6 +164,25 @@ def _print_banner(config: Config, tool_names: list[str], total_registered: int) 
     count = f"{len(tool_names)} of {total_registered} registered — " if trimmed else ""
     print(f"tools:     {count}{', '.join(tool_names)}")
     print()
+
+
+def _dump_transcript(result: AgentResult, path: str | None) -> None:
+    """Write the exact messages exchanged with the model, when --dump-transcript asked.
+
+    This is the whole conversation as the API saw it: the system prompt, every assistant
+    turn with its tool calls, and every tool result. Reading one is the fastest way to
+    understand what an agent actually *is*, which is why it is a flag and not a code edit.
+    """
+    if path is None:
+        return
+    try:
+        Path(path).write_text(json.dumps(result.messages, indent=2), encoding="utf-8")
+    except OSError as exc:
+        # A failed dump must not lose the run that produced it: the answer is already on
+        # screen, so report the problem and carry on.
+        print(f"error: could not write transcript to {path}: {exc.strerror}", file=sys.stderr)
+        return
+    print(f"(transcript written to {path})\n")
 
 
 def _print_step(step: Step, *, verbose: bool) -> None:

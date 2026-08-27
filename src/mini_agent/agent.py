@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .errors import HarnessError
-from .llm import LLMClient, ToolCall
+from .llm import SupportsComplete, ToolCall
 from .registry import ToolRegistry
 
 DEFAULT_SYSTEM_PROMPT = """\
@@ -73,6 +73,14 @@ class AgentResult:
     answer: str | None  # None if the loop hit its step limit
     steps: tuple[Step, ...] = ()
     stopped_early: bool = False
+    #: The exact conversation sent to the model, in wire format: the system prompt, the
+    #: task, every assistant turn with its tool calls, and every tool result. `steps` is
+    #: the readable summary of a run; this is the literal thing the API saw, which is what
+    #: you want when a run went wrong or when you are learning what an agent really is.
+    #:
+    #: Exposing it does NOT make the loop stateful -- it is built fresh inside `run` and
+    #: handed out afterwards, so the next run still starts from the system prompt.
+    messages: tuple[dict[str, Any], ...] = ()
 
     @property
     def tool_calls_made(self) -> int:
@@ -84,7 +92,7 @@ class Agent:
 
     def __init__(
         self,
-        llm: LLMClient,
+        llm: SupportsComplete,
         registry: ToolRegistry,
         *,
         max_steps: int = 12,
@@ -135,7 +143,15 @@ class Agent:
                 step = Step(number=number, thought=message.content)
                 steps.append(step)
                 self._announce(step)
-                return AgentResult(answer=message.content or "", steps=tuple(steps))
+                # Record the answer in the history too. Nothing is sent after this, but a
+                # transcript that stopped just before the answer would be a strange thing
+                # to hand someone trying to read the conversation.
+                messages.append(message.to_history_entry())
+                return AgentResult(
+                    answer=message.content or "",
+                    steps=tuple(steps),
+                    messages=tuple(messages),
+                )
 
             # The model must see its own tool calls before the results that answer them.
             messages.append(message.to_history_entry())
@@ -154,7 +170,9 @@ class Agent:
 
         # Out of steps. Reporting that honestly matters: a harness that returned its last
         # partial thought as "the answer" would look like it succeeded when it did not.
-        return AgentResult(answer=None, steps=tuple(steps), stopped_early=True)
+        return AgentResult(
+            answer=None, steps=tuple(steps), stopped_early=True, messages=tuple(messages)
+        )
 
     def _observe(self, call: ToolCall) -> Observation:
         """Run one tool call, turning any expected failure into readable text.
