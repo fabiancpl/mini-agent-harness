@@ -278,7 +278,7 @@ Design notes:
 `pytest`, no mocking library — `tmp_path` and small fakes only. Target: every invariant in
 `CLAUDE.md` has at least one test that fails if the invariant is removed.
 
-**As built: 285 tests, 99% line coverage and no partial branches** (`__main__.py` is covered
+**As built: 286 tests, 99% line coverage and no partial branches** (`__main__.py` is covered
 by a subprocess test that `coverage` cannot see into; every other module is at 100% under
 `--cov-branch`). Runs in ~2s, no network.
 
@@ -319,7 +319,14 @@ Bottom-up, so every layer is tested before anything depends on it.
 
 ## 11. Explicitly out of scope
 
-Streaming responses, conversation persistence across CLI sessions, retries/backoff, token
+Conversational memory of any kind — **between turns of one REPL session as well as between
+CLI invocations**. `Agent.run` builds its `messages` list locally, so every task starts from
+the system prompt. Each run is therefore independently bounded, and the workspace covers most
+of what continuity would buy: a file written by one task is still there for the next. Making
+it stateful is listed as a reader exercise, because doing so immediately raises context-window
+management, which is a much larger subject than this project wants to open.
+
+Also out of scope: streaming responses, retries/backoff, token
 accounting, parallel tool execution, sub-agents, MCP, and shell execution. Each would add
 real code for little teaching value here. The natural extensions are listed in the README so
 a reader knows where to take it next.

@@ -100,7 +100,27 @@ class Agent:
         self.on_step = on_step
 
     def run(self, task: str) -> AgentResult:
-        """Think, act, observe, repeat."""
+        """Think, act, observe, repeat.
+
+        **Each run is a fresh conversation.** `messages` is local to this method, so nothing
+        carries over between calls: ask the REPL two questions in a row and the second one
+        starts from the system prompt again, with no memory of the first.
+
+        That is deliberate. Every run is then independently bounded -- context cannot grow
+        without limit across a long session, and one confused task cannot poison the next.
+        The cost is that follow-ups phrased against the conversation ("do that again, but in
+        French") have nothing to refer back to.
+
+        The workspace is the exception, and in practice it covers most of the gap. Files
+        written by one task are still on disk for the next one, so the agent can *rediscover*
+        what it did even though it does not remember doing it. "Summarise hello.txt into
+        notes.md" followed by "add a section to notes.md" works fine; the second run just
+        reads the file.
+
+        Making this stateful is a good exercise: hold `messages` on the instance instead of
+        here, and you immediately meet the two problems every real agent has -- unbounded
+        context growth, and what to do when the window fills up.
+        """
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": task},

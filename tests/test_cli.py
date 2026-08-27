@@ -397,6 +397,17 @@ def test_a_missing_config_exits_one_from_the_real_entry_point(tmp_path: Path) ->
     assert result.stderr.startswith("error: ")
 
 
+def test_the_repl_says_up_front_that_turns_are_independent(
+    cli_config: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    # The behaviour below surprises people. Saying so costs one line and saves the question.
+    feed(monkeypatch, "exit")
+
+    main(["--config", str(cli_config)], llm_factory=fake_llm())
+
+    assert "Each task starts a fresh conversation" in capsys.readouterr().out
+
+
 def test_the_repl_keeps_conversations_independent(
     cli_config: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

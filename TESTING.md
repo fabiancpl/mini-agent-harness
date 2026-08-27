@@ -6,7 +6,7 @@ unusual for an agent — what would and would not be worth adding.
 ## Running the tests
 
 ```bash
-uv run pytest                                          # 285 tests, ~2s, no network beyond localhost
+uv run pytest                                          # 286 tests, ~2s, no network beyond localhost
 uv run pytest tests/test_sandbox.py                    # one module
 uv run pytest -k "move or copy"                        # by name
 uv run pytest --cov=mini_agent --cov-report=term-missing

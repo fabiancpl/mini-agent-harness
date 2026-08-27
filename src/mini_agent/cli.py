@@ -109,7 +109,10 @@ def _run_once(agent: Agent, task: str) -> int:
 
 
 def _repl(agent: Agent) -> int:
-    print("Type a task, or 'exit' to quit.\n")
+    # Say up front that turns are independent. It is the first thing people are surprised
+    # by, and the surprise is much cheaper to prevent here than to explain afterwards.
+    print("Type a task, or 'exit' to quit.")
+    print("Each task starts a fresh conversation; the workspace persists between them.\n")
     while True:
         try:
             task = input("task> ").strip()

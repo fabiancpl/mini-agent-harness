@@ -30,9 +30,8 @@ obvious code over clever code, and explains its design decisions in comments.
 
 ## Status
 
-Complete and tested: 285 tests, 99% coverage (no partial branches), ~2 seconds, no network.
-[`PLAN.md`](PLAN.md) is the design document; [`CLAUDE.md`](CLAUDE.md) holds the invariants
-and conventions.
+[`PLAN.md`](PLAN.md) is the design document, [`CLAUDE.md`](CLAUDE.md) holds the invariants
+and conventions; [`TESTING.md`](TESTING.md) the unit test and e2e testing strategy.
 
 ## Quickstart — no API key needed
 
@@ -111,6 +110,37 @@ python -m mini_agent                      # interactive REPL
 python -m mini_agent --verbose            # show reasoning and full observations
 python -m mini_agent --root ./sandbox     # override the workspace for one run
 ```
+
+### What the agent remembers
+
+**Each task starts a fresh conversation.** In the REPL, the second thing you type carries no
+memory of the first — the model sees the system prompt and your new task, nothing else.
+
+| Scope | Remembered? |
+| --- | --- |
+| Within one task, across ReAct steps | **Yes** — step 7 sees every thought, tool call, and observation from steps 1–6 |
+| Between tasks in one REPL session | **No** |
+| Between CLI invocations | **No** |
+| The workspace on disk | **Always** |
+
+That last row is what makes it workable. There is no *conversational* memory, but there is
+**environmental** memory: a file written by one task is still there for the next one, so the
+agent can rediscover what it did even though it does not remember doing it. This works fine —
+
+```
+task> summarise hello.txt into notes.md
+task> now add a section to notes.md about draft.txt
+```
+
+— because the second run simply reads `notes.md`. What does not work is anything phrased
+against the conversation itself: *"do that again but in French"*, or *"what did you just
+do?"*. There is nothing to refer back to.
+
+The design note is on `Agent.run` in `src/mini_agent/agent.py`: every run being independently
+bounded means context cannot grow without limit across a long session, and a confused task
+cannot poison the next one. Making it stateful is a worthwhile exercise, and immediately
+raises the two questions every real agent has to answer — how to stop context growing
+forever, and what to do when the window fills.
 
 ### Providers
 
@@ -253,7 +283,9 @@ project. See `sandbox.py` and the docstring at the top of `tools/write.py` for t
 Good exercises once you have read the code: add a confirmation prompt before writes; add a
 `trash` tool that moves into `.trash/` instead of deleting, and make the search tools ignore
 it (soft delete gives the agent the *affordance* of removal without the power of
-destruction); persist the conversation between CLI sessions; stream the model's tokens; add
+destruction); **make the REPL remember previous turns** — hold `messages` on the `Agent`
+instead of inside `run`, add a `reset` command, then solve the context-growth problem that
+appears immediately; stream the model's tokens; add
 retries with backoff; give the agent a sub-agent for read-only exploration; expose the same
 tools over MCP.
 
