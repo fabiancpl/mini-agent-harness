@@ -222,3 +222,7 @@ __marimo__/
 config.yaml
 # The agent's sandbox root — scratch space, not source.
 workspace/
+# Claude Code: .claude/settings.json is shared and tracked. These are not — settings.local
+# is per-machine, and worktrees/ holds entire checkouts that must never be committed.
+.claude/settings.local.json
+.claude/worktrees/

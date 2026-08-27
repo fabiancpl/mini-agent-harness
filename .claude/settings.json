@@ -1,0 +1,6 @@
+{
+  "//": "Background and parallel agents are NOT forced into a git worktree for this repo. See 'Working in this repo' in CLAUDE.md: the venv's editable install points at the main checkout, so a test run inside a worktree silently imports the wrong source and can be green for nothing.",
+  "worktree": {
+    "bgIsolation": "none"
+  }
+}

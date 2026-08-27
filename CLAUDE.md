@@ -22,6 +22,25 @@ feature coverage, and defensive robustness.
 - **Comment the *why*.** The code says what it does; comments explain the design decision
   behind it (especially in `sandbox.py` and `agent.py`).
 
+## Working in this repo
+
+**Do not create git worktrees here.** Use an ordinary branch — `git switch -c fix-something`
+— unless the maintainer explicitly asks for a worktree in that session. One maintainer works
+on one thing at a time, so worktrees cost more than the isolation is worth:
+
+- The venv holds an **editable install pointing at this checkout**, so `pytest` run inside a
+  worktree silently imports `src/` from *here*, not the code being edited. A green suite in a
+  worktree can mean nothing at all. If a worktree is ever genuinely needed, create a venv
+  inside it or run with `PYTHONPATH=<worktree>/src`.
+- `config.yaml` and `workspace/` are gitignored, so a fresh worktree starts without the
+  endpoint config the evals need.
+- The stash stack is shared between worktrees.
+
+`.claude/settings.json` sets `worktree.bgIsolation: "none"`, which is what stops background
+and parallel agents being *forced* into one. Without that setting the runner isolates them
+automatically, and its guard also blocks editing the very file that disables it — so if you
+find yourself unable to edit this checkout, that setting is the thing to check.
+
 ## Commands
 
 ```bash
