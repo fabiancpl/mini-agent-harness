@@ -176,7 +176,12 @@ def _dump_transcript(result: AgentResult, path: str | None) -> None:
     if path is None:
         return
     try:
-        Path(path).write_text(json.dumps(result.messages, indent=2), encoding="utf-8")
+        destination = Path(path)
+        # `--dump-transcript dumps/run.json` is the obvious way to keep transcripts out of
+        # the way, so create the directory rather than failing on a path the user clearly
+        # meant. Nothing is overwritten: only the missing parents are made.
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(result.messages, indent=2), encoding="utf-8")
     except OSError as exc:
         # A failed dump must not lose the run that produced it: the answer is already on
         # screen, so report the problem and carry on.

@@ -4,6 +4,16 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`--dump-transcript` creates the directory it is asked to write into.** `--dump-transcript
+  dumps/run.json` failed with `No such file or directory` unless `dumps/` already existed,
+  which is the first thing anyone types to keep transcripts out of the way. Only missing
+  parents are created; a dump that still cannot be written is reported and the run's answer
+  is kept, as before.
+
 ## [0.2.0] — 2026-08-27
 
 The "forkable" release. 0.1.0 was built to be read; an evaluation of it found that reading

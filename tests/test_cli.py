@@ -468,10 +468,34 @@ def test_no_transcript_is_written_without_the_flag(cli_config: Path, tmp_path: P
     assert list(tmp_path.glob("*.json")) == []
 
 
-def test_an_unwritable_transcript_path_does_not_lose_the_run(cli_config: Path, capsys) -> None:
+def test_dump_transcript_creates_a_missing_parent_directory(
+    cli_config: Path, tmp_path: Path
+) -> None:
+    # `--dump-transcript dumps/run.json` is how anyone keeps transcripts out of the way,
+    # and the directory does not exist the first time.
+    destination = tmp_path / "dumps" / "nested" / "transcript.json"
+
+    code = main(
+        ["--config", str(cli_config), "--task", "look", "--dump-transcript", str(destination)],
+        llm_factory=fake_llm(answer("Done.")),
+    )
+
+    assert code == 0
+    assert json.loads(destination.read_text(encoding="utf-8"))[0]["role"] == "system"
+
+
+def test_an_unwritable_transcript_path_does_not_lose_the_run(
+    cli_config: Path, tmp_path: Path, capsys
+) -> None:
+    # A file where the directory should be: no amount of mkdir makes this path writable.
+    # (Being unreadable to *this* user would not do -- the suite may run as root.)
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    destination = blocker / "t.json"
+
     # The answer is already on screen; a failed dump must not turn a good run into an error.
     code = main(
-        ["--config", str(cli_config), "--task", "look", "--dump-transcript", "/nope/t.json"],
+        ["--config", str(cli_config), "--task", "look", "--dump-transcript", str(destination)],
         llm_factory=fake_llm(answer("Done.")),
     )
 
