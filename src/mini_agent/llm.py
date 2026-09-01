@@ -133,11 +133,12 @@ def _parse_response(data: dict[str, Any]) -> Message:
     raw_calls = message.get("tool_calls") or []
     return Message(
         content=message.get("content"),
-        tool_calls=tuple(_parse_tool_call(raw) for raw in raw_calls),
+        # The index is only used to synthesise an id when the server omits one -- see below.
+        tool_calls=tuple(_parse_tool_call(raw, index) for index, raw in enumerate(raw_calls)),
     )
 
 
-def _parse_tool_call(raw: dict[str, Any]) -> ToolCall:
+def _parse_tool_call(raw: dict[str, Any], index: int = 0) -> ToolCall:
     function = raw.get("function") or {}
     name = function.get("name")
     if not name:
@@ -154,5 +155,10 @@ def _parse_tool_call(raw: dict[str, Any]) -> ToolCall:
     if not isinstance(arguments, dict):
         raise LLMError(f"Arguments for {name} were not an object: {arguments!r}")
 
-    # Some servers omit the id. The agent only needs it to pair a result with its call.
-    return ToolCall(id=raw.get("id") or f"call_{name}", name=name, arguments=arguments)
+    # Some servers omit the id. The agent only needs it to pair a result with its call, so any
+    # unique string will do -- but it does have to be unique. Naming it after the tool alone was
+    # not: a model that asks to read two files in one turn produces two calls named `read_file`,
+    # so both results came back tagged `call_read_file` and nothing could say which was which.
+    # The position in the message is what makes them distinct; the name is kept because a
+    # visibly synthetic id is easier to recognise in a transcript than a bare number.
+    return ToolCall(id=raw.get("id") or f"call_{index}_{name}", name=name, arguments=arguments)

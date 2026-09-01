@@ -192,7 +192,42 @@ def test_substitutes_an_id_when_the_server_omits_one(post) -> None:
     call = {"type": "function", "function": {"name": "read_file", "arguments": "{}"}}
     post.response = FakeResponse(chat_response(None, [call]))
 
-    assert LLMClient(CONFIG).complete([]).tool_calls[0].id == "call_read_file"
+    assert LLMClient(CONFIG).complete([]).tool_calls[0].id == "call_0_read_file"
+
+
+def test_substituted_ids_are_unique_within_one_message(post) -> None:
+    """Two calls to the same tool must not end up sharing an id.
+
+    The id is the only thing pairing a tool result with the call that asked for it. Naming the
+    substitute after the tool alone meant a model reading two files in one turn produced two
+    results both tagged `call_read_file`, and the pairing became a guess -- for the rest of the
+    conversation, since the ambiguity is written into the history.
+    """
+    calls = [
+        {"type": "function", "function": {"name": "read_file", "arguments": '{"path": "a"}'}},
+        {"type": "function", "function": {"name": "read_file", "arguments": '{"path": "b"}'}},
+    ]
+    post.response = FakeResponse(chat_response(None, calls))
+
+    ids = [call.id for call in LLMClient(CONFIG).complete([]).tool_calls]
+
+    assert ids == ["call_0_read_file", "call_1_read_file"]
+    assert len(set(ids)) == len(ids)
+
+
+def test_a_server_supplied_id_is_always_preferred(post) -> None:
+    # The substitute is a fallback, not a rewrite: if the server sent an id, it is the one the
+    # server expects back on the tool result.
+    calls = [
+        {"id": "abc", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+        {"type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+    ]
+    post.response = FakeResponse(chat_response(None, calls))
+
+    assert [call.id for call in LLMClient(CONFIG).complete([]).tool_calls] == [
+        "abc",
+        "call_1_read_file",
+    ]
 
 
 # --- failures ------------------------------------------------------------------------------
