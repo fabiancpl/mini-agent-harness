@@ -150,7 +150,7 @@ context growth yourself is the point of it. See §12.
   different shape needs edits to the loop and not just a new client. Named explicitly in
   `EXTENDING.md` rather than left to be discovered.
 
-## [0.1.0] — 2026-08-20
+## [0.1.0] — 2026-08-27
 
 First release: a complete, readable ReAct agent harness that navigates and edits files
 inside one sandboxed folder. Built for teaching — the whole thing is meant to be read in an
