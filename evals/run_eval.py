@@ -131,6 +131,26 @@ def check_searched_cleanly(root: Path, result: AgentResult) -> str | None:
     return None
 
 
+def check_followed_up(root: Path, result: AgentResult) -> str | None:
+    """Did the second turn understand a request that only makes sense given the first?
+
+    "Do the same thing again, but write it to notes2.md" names no source file and no action.
+    A harness with no conversational memory sees only that sentence, so it has to guess --
+    and the guess is usually a clarifying question or a file with the wrong content. This is
+    the property conversational memory exists to provide, so it is the one worth measuring.
+    """
+    target = root / "notes2.md"
+    if not target.exists():
+        return "notes2.md was never created -- the follow-up did not resolve to the first turn"
+    if not target.read_text(encoding="utf-8").strip():
+        return "notes2.md was created but is empty"
+    if not (root / "notes.md").exists():
+        return "notes2.md exists but notes.md does not, so the first turn never happened"
+    if (root / "hello.txt").read_text(encoding="utf-8") != HELLO_TEXT:
+        return "the source file was modified along the way"
+    return None
+
+
 # --- the tasks -------------------------------------------------------------------------------
 
 
@@ -145,6 +165,10 @@ class EvalTask:
     property_checked: str
     seed: Callable[[Path], None]
     check: Callable[[Path, AgentResult], str | None]
+    #: A second task, asked in the same conversation. Only useful since 0.3.0, and the only
+    #: way to measure conversational memory: a follow-up that cannot be understood on its own
+    #: either resolves against the first turn or does not.
+    follow_up: str | None = None
 
 
 TASKS: tuple[EvalTask, ...] = (
@@ -176,6 +200,17 @@ TASKS: tuple[EvalTask, ...] = (
         seed=seed_hello,
         check=check_searched_cleanly,
     ),
+    EvalTask(
+        name="followup",
+        prompt="Summarise hello.txt into a new file called notes.md.",
+        # Deliberately unintelligible on its own: "that" and "the same thing" have no referent
+        # unless the first turn is still in the conversation. A model with no memory has to
+        # guess, and the guess almost never lands on notes.md.
+        follow_up="Now do the same thing again, but write it to notes2.md.",
+        property_checked="the follow-up resolved against the first turn: notes2.md exists",
+        seed=seed_hello,
+        check=check_followed_up,
+    ),
 )
 
 
@@ -198,6 +233,10 @@ def run_once(task: EvalTask, config: Config, max_steps: int) -> str | None:
 
         try:
             result = agent.run(task.prompt)
+            if task.follow_up is not None:
+                # The same agent, deliberately: the follow-up is only answerable because the
+                # first exchange is still in the conversation.
+                result = agent.run(task.follow_up)
         except HarnessError as exc:
             # A provider outage is not the agent failing the property; say which it was.
             return f"the run could not complete: {exc}"

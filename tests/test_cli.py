@@ -415,28 +415,62 @@ def test_a_missing_config_exits_one_from_the_real_entry_point(tmp_path: Path) ->
     assert result.stderr.startswith("error: ")
 
 
-def test_the_repl_says_up_front_that_turns_are_independent(
+def test_the_repl_says_up_front_that_turns_share_a_conversation(
     cli_config: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    # The behaviour below surprises people. Saying so costs one line and saves the question.
+    # Both halves matter: that turns accumulate, and that `reset` is how you stop them.
     feed(monkeypatch, "exit")
 
     main(["--config", str(cli_config)], llm_factory=fake_llm())
 
-    assert "Each task starts a fresh conversation" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Turns share one conversation" in out
+    assert "reset" in out
 
 
-def test_the_repl_keeps_conversations_independent(
+def test_the_repl_carries_the_conversation_between_turns(
     cli_config: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Each task starts a fresh conversation: the second run must not inherit the first.
+    """The inverse of the 0.2.0 guard, rewritten deliberately rather than repaired.
+
+    This is the release in one assertion: the second request carries the first exchange.
+    """
     client = FakeLLMClient([answer("one"), answer("two")])
     feed(monkeypatch, "first", "second", "exit")
 
     main(["--config", str(cli_config)], llm_factory=lambda config: client)
 
+    assert [message["content"] for message in client.received[1]][1:] == [
+        "first",
+        "one",
+        "second",
+    ]
+
+
+def test_reset_forgets_the_conversation(
+    cli_config: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    client = FakeLLMClient([answer("one"), answer("two")])
+    feed(monkeypatch, "first", "reset", "second", "exit")
+
+    main(["--config", str(cli_config)], llm_factory=lambda config: client)
+
+    # The second request starts over: system prompt and the new task, nothing else.
+    assert len(client.received[1]) == 2
     assert client.received[1][1] == {"role": "user", "content": "second"}
-    assert len(client.received[1]) == 2  # system + user only
+    assert "Forgotten" in capsys.readouterr().out
+
+
+def test_reset_does_not_count_as_a_task(
+    cli_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Typing `reset` must not spend a model call, the way a blank line does not.
+    client = FakeLLMClient([answer("one")])
+    feed(monkeypatch, "reset", "first", "exit")
+
+    main(["--config", str(cli_config)], llm_factory=lambda config: client)
+
+    assert len(client.received) == 1
 
 
 # --- --dump-transcript -------------------------------------------------------------------------

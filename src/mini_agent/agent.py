@@ -73,13 +73,14 @@ class AgentResult:
     answer: str | None  # None if the loop hit its step limit
     steps: tuple[Step, ...] = ()
     stopped_early: bool = False
-    #: The exact conversation sent to the model, in wire format: the system prompt, the
+    #: The exact conversation sent to the model, in wire format: the system prompt, every
     #: task, every assistant turn with its tool calls, and every tool result. `steps` is
     #: the readable summary of a run; this is the literal thing the API saw, which is what
     #: you want when a run went wrong or when you are learning what an agent really is.
     #:
-    #: Exposing it does NOT make the loop stateful -- it is built fresh inside `run` and
-    #: handed out afterwards, so the next run still starts from the system prompt.
+    #: Since 0.3.0 this is the whole *session*, not one run: the second run in a session
+    #: returns its own turn and the first one. The dicts are the same objects the agent is
+    #: still using, so read them and do not edit them.
     messages: tuple[dict[str, Any], ...] = ()
 
     @property
@@ -106,33 +107,52 @@ class Agent:
         # Called as each step finishes, so the CLI can show progress live. The loop itself
         # never prints: keeping I/O out of it is what makes it straightforward to test.
         self.on_step = on_step
+        # The conversation so far. `run` works on a *copy* and assigns back only when it
+        # returns, so a turn that raises leaves this exactly as it was -- see `run`.
+        self.messages: list[dict[str, Any]] = []
+        self.reset()
+
+    def reset(self) -> None:
+        """Forget the conversation and start again from the system prompt.
+
+        The system prompt is read from the attribute rather than a stashed copy, so setting
+        `agent.system_prompt` and calling this is a working way to try a different prompt.
+        """
+        self.messages = [{"role": "system", "content": self.system_prompt}]
 
     def run(self, task: str) -> AgentResult:
         """Think, act, observe, repeat.
 
-        **Each run is a fresh conversation.** `messages` is local to this method, so nothing
-        carries over between calls: ask the REPL two questions in a row and the second one
-        starts from the system prompt again, with no memory of the first.
+        **Runs share one conversation.** The task is appended to `self.messages`, so asking a
+        second question in the same session continues the first: "do that again, but in
+        French" has something to refer back to. `reset()` starts over.
 
-        That is deliberate. Every run is then independently bounded -- context cannot grow
-        without limit across a long session, and one confused task cannot poison the next.
-        The cost is that follow-ups phrased against the conversation ("do that again, but in
-        French") have nothing to refer back to.
+        The interesting part is the copy on the next line. The loop works on its own list and
+        assigns it back only on the two paths that *return*, so a turn that raises -- a
+        dropped connection, Ctrl-C, a bug -- leaves `self.messages` exactly as it was. That
+        matters more than it looks: the loop appends an assistant message with tool calls and
+        then the results answering them, and a history left holding the first without the
+        second is malformed. Every later request would be rejected, for the rest of the
+        session, because of one blip. Committing only on success makes that unreachable.
 
-        The workspace is the exception, and in practice it covers most of the gap. Files
-        written by one task are still on disk for the next one, so the agent can *rediscover*
-        what it did even though it does not remember doing it. "Summarise hello.txt into
-        notes.md" followed by "add a section to notes.md" works fine; the second run just
-        reads the file.
+        A shallow copy is the right one: no message dict is ever mutated after it is
+        appended, so the copy only has to stop the *list* being shared. Deep-copying would
+        imply mutation is expected somewhere, which would be a lie about how this works. It
+        does mean the dicts in a returned `AgentResult.messages` are the same objects as the
+        ones here -- read them, do not edit them.
 
-        Making this stateful is a good exercise: hold `messages` on the instance instead of
-        here, and you immediately meet the two problems every real agent has -- unbounded
-        context growth, and what to do when the window fills up.
+        One honest asymmetry, because it will look like a bug otherwise. `on_step` fires as
+        each step finishes, so a turn that fails midway has already *printed* steps the model
+        will not remember. The files those steps wrote are still on disk too. Environmental
+        memory and conversational memory diverge under failure, and the workspace is the one
+        telling the truth about what happened.
+
+        Nothing here bounds the conversation. `max_steps` bounds a single run; a session grows
+        until the window fills or someone calls `reset`.
         """
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": task},
-        ]
+        # See the docstring: work on a copy, commit only when we return.
+        messages: list[dict[str, Any]] = list(self.messages)
+        messages.append({"role": "user", "content": task})
         steps: list[Step] = []
 
         for number in range(1, self.max_steps + 1):
@@ -147,6 +167,7 @@ class Agent:
                 # transcript that stopped just before the answer would be a strange thing
                 # to hand someone trying to read the conversation.
                 messages.append(message.to_history_entry())
+                self.messages = messages  # commit: this turn finished cleanly
                 return AgentResult(
                     answer=message.content or "",
                     steps=tuple(steps),
@@ -170,6 +191,13 @@ class Agent:
 
         # Out of steps. Reporting that honestly matters: a harness that returned its last
         # partial thought as "the answer" would look like it succeeded when it did not.
+        #
+        # This commits too, and the history is sound: each iteration appends the assistant
+        # turn and all of its tool results together, so running out of steps always leaves a
+        # complete exchange. The next turn continues from an unfinished task, which is
+        # usually what you want -- "keep going" is the obvious follow-up. `reset` is there
+        # for when it is not.
+        self.messages = messages
         return AgentResult(
             answer=None, steps=tuple(steps), stopped_early=True, messages=tuple(messages)
         )

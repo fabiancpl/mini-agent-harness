@@ -426,12 +426,83 @@ def test_the_transcript_survives_running_out_of_steps(registry: ToolRegistry) ->
     ]
 
 
-def test_exposing_the_transcript_did_not_make_the_loop_stateful(registry: ToolRegistry) -> None:
-    """Each run must still start from the system prompt -- PLAN.md §11 depends on it."""
+def test_a_second_run_continues_the_same_conversation(registry: ToolRegistry) -> None:
+    """The inverse of the guard 0.2.0 shipped, replaced deliberately when 0.3.0 reopened §11.
+
+    This is the whole feature: the second task is asked *after* the first exchange rather than
+    instead of it, which is what gives a follow-up something to refer back to.
+    """
+    agent, llm = make_agent([answer("first"), answer("second")], registry)
+
+    agent.run("one")
+    second = agent.run("two")
+
+    assert [message["content"] for message in second.messages[1:]] == [
+        "one",
+        "first",
+        "two",
+        "second",
+    ]
+    # And the model was actually sent the earlier turns, not just told about them afterwards.
+    assert [message["content"] for message in llm.received[-1]][1:] == ["one", "first", "two"]
+
+
+def test_reset_starts_a_new_conversation(registry: ToolRegistry) -> None:
     agent, _ = make_agent([answer("first"), answer("second")], registry)
 
-    first = agent.run("one")
+    agent.run("one")
+    agent.reset()
     second = agent.run("two")
 
     assert [message["content"] for message in second.messages[1:]] == ["two", "second"]
-    assert len(second.messages) == len(first.messages)
+
+
+def test_reset_keeps_the_system_prompt(registry: ToolRegistry) -> None:
+    agent, _ = make_agent([answer("first")], registry)
+
+    agent.reset()
+
+    assert agent.messages == [{"role": "system", "content": DEFAULT_SYSTEM_PROMPT}]
+
+
+def test_a_failed_turn_leaves_the_conversation_untouched(registry: ToolRegistry) -> None:
+    """Commit-on-success, and the reason the copy in `run` exists.
+
+    A turn that dies between an assistant tool call and its results would leave a malformed
+    history, and every later request in the session would be rejected because of one blip.
+    Deleting the two `self.messages = messages` lines does not fail this test -- deleting the
+    `list(...)` copy does.
+    """
+    agent, llm = make_agent([acts("reading", ("list_directory", {})), answer("done")], registry)
+    agent.run("one")
+    before = list(agent.messages)
+
+    llm.responses = [_Boom()]
+    with pytest.raises(RuntimeError):
+        agent.run("two")
+
+    assert agent.messages == before
+
+
+def test_running_out_of_steps_still_commits(registry: ToolRegistry) -> None:
+    # The history is complete either way: each iteration appends the assistant turn and its
+    # tool results together, so a truncated run leaves a well-formed exchange to continue.
+    calls = [acts("looking", ("list_directory", {})) for _ in range(2)]
+    agent, _ = make_agent(calls, registry, max_steps=2)
+
+    result = agent.run("one")
+
+    assert result.stopped_early
+    assert agent.messages == list(result.messages)
+
+
+class _Boom:
+    """Stands in for a model reply that never arrives: touching it raises.
+
+    A real mid-turn failure is a dropped socket or a Ctrl-C inside `complete`. Any exception
+    reaching `run` exercises the same path, and this needs no network to arrange.
+    """
+
+    @property
+    def tool_calls(self) -> tuple[()]:
+        raise RuntimeError("the connection dropped mid-turn")

@@ -22,6 +22,7 @@ from mini_agent.llm import ToolCall
 
 from run_eval import (
     HELLO_TEXT,
+    check_followed_up,
     check_refused_to_delete,
     check_renamed,
     check_searched_cleanly,
@@ -263,3 +264,40 @@ def test_every_difference_is_reported_not_just_the_first() -> None:
     )
 
     assert len(warnings) == 3
+
+
+# --- the follow-up checker -------------------------------------------------------------------
+#
+# The task this checks only became possible in 0.3.0, when runs started sharing a conversation.
+
+
+def test_check_followed_up_passes_when_both_files_were_written(tmp_path: Path) -> None:
+    (tmp_path / "hello.txt").write_text(HELLO_TEXT, encoding="utf-8")
+    (tmp_path / "notes.md").write_text("a summary\n", encoding="utf-8")
+    (tmp_path / "notes2.md").write_text("a summary\n", encoding="utf-8")
+
+    assert check_followed_up(tmp_path, answered("Done.")) is None
+
+
+def test_check_followed_up_catches_a_follow_up_that_never_resolved(tmp_path: Path) -> None:
+    # What a model with no memory does: the first turn lands, the second is unintelligible.
+    (tmp_path / "hello.txt").write_text(HELLO_TEXT, encoding="utf-8")
+    (tmp_path / "notes.md").write_text("a summary\n", encoding="utf-8")
+
+    assert "notes2.md was never created" in check_followed_up(tmp_path, answered("Which file?"))
+
+
+def test_check_followed_up_catches_an_empty_second_file(tmp_path: Path) -> None:
+    (tmp_path / "hello.txt").write_text(HELLO_TEXT, encoding="utf-8")
+    (tmp_path / "notes.md").write_text("a summary\n", encoding="utf-8")
+    (tmp_path / "notes2.md").write_text("   \n", encoding="utf-8")
+
+    assert "empty" in check_followed_up(tmp_path, answered("Done."))
+
+
+def test_check_followed_up_catches_a_damaged_source(tmp_path: Path) -> None:
+    (tmp_path / "hello.txt").write_text("clobbered\n", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("a summary\n", encoding="utf-8")
+    (tmp_path / "notes2.md").write_text("a summary\n", encoding="utf-8")
+
+    assert "modified" in check_followed_up(tmp_path, answered("Done."))

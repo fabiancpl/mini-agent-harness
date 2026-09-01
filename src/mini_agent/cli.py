@@ -122,10 +122,10 @@ def _run_once(agent: Agent, task: str, dump_path: str | None = None) -> int:
 
 
 def _repl(agent: Agent, dump_path: str | None = None) -> int:
-    # Say up front that turns are independent. It is the first thing people are surprised
-    # by, and the surprise is much cheaper to prevent here than to explain afterwards.
-    print("Type a task, or 'exit' to quit.")
-    print("Each task starts a fresh conversation; the workspace persists between them.\n")
+    # Say up front that turns build on each other, and name the way out. There are three
+    # commands now, which is one more than fits in a parenthetical -- so list them.
+    print("Type a task. Commands: 'reset' to forget the conversation, 'exit' to quit.")
+    print("Turns share one conversation; the workspace persists between them.\n")
     while True:
         try:
             task = input("task> ").strip()
@@ -137,12 +137,20 @@ def _repl(agent: Agent, dump_path: str | None = None) -> int:
             continue
         if task in {"exit", "quit"}:
             return EXIT_OK
+        if task == "reset":
+            # The whole context-growth answer in this release: the conversation grows until
+            # you say otherwise. Nothing is ever dropped behind your back.
+            agent.reset()
+            print("Forgotten. The next task starts a fresh conversation.\n")
+            continue
 
         try:
             result = agent.run(task)
             _print_result(result)
-            # Each turn is a separate conversation, so each turn overwrites the file. There
-            # is no combined transcript to write: there was never a combined conversation.
+            # Each turn overwrites the file, and now that is the point rather than a
+            # limitation: `result.messages` is the whole session, so the last write is a
+            # complete transcript of everything that happened. Before 0.3.0 it could only
+            # ever be the final turn, because there was no combined conversation to write.
             _dump_transcript(result, dump_path)
         except KeyboardInterrupt:
             # Ctrl-C abandons the current run but keeps the session alive.
@@ -221,7 +229,8 @@ def _print_result(result: AgentResult) -> None:
         steps = "step" if len(result.steps) == 1 else "steps"
         print(
             f"\nStopped after {len(result.steps)} {steps} without finishing. "
-            f"Raise agent.max_steps, or give a smaller task.\n"
+            f"Raise agent.max_steps, or give a smaller task. The conversation is kept, so "
+            f"'keep going' continues from here; 'reset' throws it away.\n"
         )
         return
     print(f"\n{result.answer}\n")
