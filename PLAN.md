@@ -323,17 +323,28 @@ Bottom-up, so every layer is tested before anything depends on it.
 
 ## 11. Explicitly out of scope
 
-Conversational memory of any kind — **between turns of one REPL session as well as between
-CLI invocations**. `Agent.run` builds its `messages` list locally, so every task starts from
-the system prompt. Each run is therefore independently bounded, and the workspace covers most
-of what continuity would buy: a file written by one task is still there for the next. Making
-it stateful is listed as a reader exercise, because doing so immediately raises context-window
-management, which is a much larger subject than this project wants to open.
+**Persistent memory** — anything that outlives the process. No session files, no `--resume`,
+no named sessions. A conversation lives on the `Agent` instance and ends with it. Persistence
+is a storage design (where do files go, what happens when the schema changes, who cleans up),
+and none of that teaches anything about agents.
 
-Also out of scope: streaming responses, retries/backoff, token
-accounting, parallel tool execution, sub-agents, MCP, and shell execution. Each would add
-real code for little teaching value here. The natural extensions are listed in the README so
-a reader knows where to take it next.
+**Automatic context management** — trimming, summarising, compaction, or any policy that drops
+a message the reader did not ask to drop. 0.3.0 makes context growth *visible* and gives the
+user `reset`; deciding what to throw away when the window fills stays the reader's exercise,
+and is now a better one, because it starts from a working session instead of a blank page.
+See §13.
+
+Also out of scope: streaming responses, parallel tool execution, sub-agents, MCP, and shell
+execution. Each would add real code for little teaching value here. The natural extensions are
+listed in the README so a reader knows where to take it next.
+
+**Three items left this section in 0.3.0** — conversational memory within one session,
+retries/backoff, and token accounting. They were not reopened one at a time on their merits;
+they are one change wearing three hats. Memory is the feature, and the other two are what
+memory *makes true*: once the conversation is the unit of work, you need to know how big it is
+getting, and losing it to a dropped connection stops being an inconvenience and starts being
+expensive. Shipping memory without them would have been the dishonest version. §13 has the
+full argument.
 
 **Evals against a real provider** were deferred rather than rejected, and were **built in
 0.2.0** as `evals/run_eval.py`. They are the one thing that can measure prompt changes or
@@ -370,3 +381,40 @@ worth naming, because both look at first glance like §11 violations and neither
   growth and decide what to do when the window fills. Shipping it would take that away.
 
 The evals were the one deferred item that became real; see §11 and `TESTING.md`.
+
+> **Superseded by 0.3.0.** Both bullets above describe 0.2.0 accurately and are kept as the
+> record of what was true then. The second one is the decision 0.3.0 revisits — and §13 argues
+> it was half right: the three lines that hold `messages` on the instance were never the
+> valuable part of that exercise. The guard test named in the first bullet is gone, replaced by
+> its inverse.
+
+## 13. What 0.3.0 changed: the session
+
+0.2.0 asked whether a developer could extend this project. 0.3.0 comes from the complaint that
+survives every other answer: you type a second thing into the REPL and the agent has forgotten
+the first. §11 called that out of scope and pointed at the workspace — a file written by one
+task is still there for the next — which is true, and is not the same thing. It covers *"add a
+section to notes.md"*. It cannot cover *"do that again, but in French"*, because there is no
+"that".
+
+**Why the exercise argument did not survive contact.** §12 said shipping memory would take away
+the most valuable exercise in the project. The mistake was in what "it" referred to. Holding
+`messages` on the instance is three lines, and `README.md` already spelled them out; nobody
+learns anything from typing them. The valuable half was always the *second* half — what do you
+do when the window fills? So 0.3.0 ships the three lines and keeps the question. The harness
+now tells you exactly how full the context is and gives you `reset`; it will never drop a
+message on your behalf. A reader who wants compaction still has to design it, and now gets to
+design it against a session that actually exists.
+
+**Why retries and token accounting came along.** Both were §11 entries, and neither is here to
+round out a release. Memory changes what a failure costs: a dropped connection used to lose one
+task and now loses a conversation, so `LLMClient` retries transient faults instead of throwing
+the session away. Memory also removes the bound that made accounting pointless — `max_steps`
+caps a single run, and nothing caps a session, so the number that was previously constant is
+now the number that matters. Both are consequences of the first decision rather than features
+in their own right, which is why one release carries all three.
+
+**What did not change.** No new agent capability: still ten tools, still no delete, still one
+sandboxed root. The invariants in `CLAUDE.md` are untouched except for one clarifying clause on
+invariant 5 — `max_steps` bounds a *run*, and it is now worth saying out loud that nothing
+bounds a *session* except the person typing `reset`.
