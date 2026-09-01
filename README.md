@@ -109,7 +109,7 @@ export OPENAI_API_KEY=sk-...
 
 ```bash
 python -m mini_agent --task "list the files here and tell me what this workspace is"
-python -m mini_agent                      # interactive REPL
+python -m mini_agent                      # interactive REPL, one conversation per session
 python -m mini_agent --verbose            # show reasoning and full observations
 python -m mini_agent --root ./sandbox     # override the workspace for one run
 python -m mini_agent --task "…" --dump-transcript run.json   # the raw conversation
@@ -122,34 +122,48 @@ thing is `result.messages`.
 
 ### What the agent remembers
 
-**Each task starts a fresh conversation.** In the REPL, the second thing you type carries no
-memory of the first — the model sees the system prompt and your new task, nothing else.
+**One REPL session is one conversation.** The second thing you type builds on the first, so
+follow-ups work the way you would expect:
+
+```
+task> summarise hello.txt into notes.md
+task> now do the same for draft.txt
+task> what did you just do?
+```
 
 | Scope | Remembered? |
 | --- | --- |
 | Within one task, across ReAct steps | **Yes** — step 7 sees every thought, tool call, and observation from steps 1–6 |
-| Between tasks in one REPL session | **No** |
-| Between CLI invocations | **No** |
+| Between tasks in one REPL session | **Yes** — until you type `reset` |
+| Between CLI invocations | **No** — the conversation lives in the process and dies with it |
 | The workspace on disk | **Always** |
 
-That last row is what makes it workable. There is no *conversational* memory, but there is
-**environmental** memory: a file written by one task is still there for the next one, so the
-agent can rediscover what it did even though it does not remember doing it. This works fine —
+There are two different memories here and it is worth keeping them apart. **Conversational**
+memory is the transcript, and it is gone when the process exits. **Environmental** memory is
+the workspace, and it outlives everything — which is why a fresh `--task` invocation can still
+pick up where the last one left off, by reading the files rather than by remembering them.
+
+**Nothing is ever dropped behind your back.** A conversation grows until you end it, and the
+harness tells you how big it is getting:
 
 ```
-task> summarise hello.txt into notes.md
-task> now add a section to notes.md about draft.txt
+  context: 12,480 of 32,768 tokens (38%)
 ```
 
-— because the second run simply reads `notes.md`. What does not work is anything phrased
-against the conversation itself: *"do that again but in French"*, or *"what did you just
-do?"*. There is nothing to refer back to.
+Set `llm.context_window` to get the percentage; without it you still get the token count. When
+the server does not report token usage at all, you get exact message and character counts
+instead — never an estimate, because on this workload (tool schemas, JSON arguments, directory
+listings) a character-based guess reads low exactly when the window is filling up.
 
-The design note is on `Agent.run` in `src/mini_agent/agent.py`: every run being independently
-bounded means context cannot grow without limit across a long session, and a confused task
-cannot poison the next one. Making it stateful is a worthwhile exercise, and immediately
-raises the two questions every real agent has to answer — how to stop context growing
-forever, and what to do when the window fills.
+Past 75% it says so and suggests `reset`, which forgets the conversation and starts again from
+the system prompt. That is the only way anything leaves the history. There is no automatic
+trimming and no summarisation, on purpose — deciding what to throw away is the interesting
+part, and it is left to you. See "Where to take it next".
+
+The design note is on `Agent.run` in `src/mini_agent/agent.py`, and the part worth reading is
+why the loop works on a *copy* of the conversation and commits it only when a turn finishes:
+a turn that dies halfway would otherwise leave an assistant message whose tool calls have no
+results, and every later request in the session would be rejected because of it.
 
 ### Providers
 
@@ -189,9 +203,11 @@ copying it. Two things in it are load-bearing:
 
 | Setting | Effect |
 | --- | --- |
-| `agent.max_steps` | Hard bound on the loop, and your cost ceiling. 12 is generous for small tasks |
+| `agent.max_steps` | Hard bound on **one task**, and your per-task cost ceiling. 12 is generous for small tasks. It does not bound a session: turns accumulate until you `reset` |
 | `agent.root_path` | The sandbox. Relative paths resolve against `config.yaml`, not your shell |
 | `llm.temperature` | `0.0` keeps tool calling deterministic and debuggable |
+| `llm.context_window` | Optional. Lets the CLI show how full the conversation is, as a percentage, and warn past 75% |
+| `llm.max_attempts` | Total tries per request, default 3. Only transient faults are retried — a bad key or a typo'd URL fails at once. `1` turns retrying off |
 | `tools.enabled` | Ships commented out, which enables every registered tool. Uncomment it for a strict allow-list — the first four alone give you a **read-only agent** that can explore and explain but never touch anything. A tool you register but leave off the list is not loaded; the banner prints `10 of 11 registered` when that is happening |
 
 ### When something goes wrong
@@ -265,8 +281,10 @@ The other three limits:
   sandbox root, fully resolved (which normalises `..` *and* follows symlinks), and only then
   checked to be inside the root. `../../etc/passwd`, `/etc/passwd`, and a symlink pointing
   out all fail the same way. `move` and `copy` check *both* of their paths.
-- **It cannot run forever.** `agent.max_steps` bounds the loop, and it says so when it runs
-  out rather than inventing an answer.
+- **It cannot run forever on one task.** `agent.max_steps` bounds the loop, and it says so
+  when it runs out rather than inventing an answer. A *session* is not bounded: the
+  conversation grows until you type `reset`, which is why the CLI reports its size after
+  every turn.
 - **It cannot run shell commands.** No execution tool exists.
 
 That layering — *capability absent* beats *capability denied* — is the main lesson of the
@@ -300,14 +318,16 @@ Start there.
 Good exercises once you have read the code: add a confirmation prompt before writes; add a
 `trash` tool that moves into `.trash/` instead of deleting, and make the search tools ignore
 it (soft delete gives the agent the *affordance* of removal without the power of
-destruction); **make the REPL remember previous turns** — hold `messages` on the `Agent`
-instead of inside `run`, add a `reset` command, then solve the context-growth problem that
-appears immediately; stream the model's tokens; add
-retries with backoff; give the agent a sub-agent for read-only exploration; expose the same
-tools over MCP.
+destruction); **decide what to do when the context window fills** — the harness will tell you
+it is filling and then do nothing about it, so this one is yours; stream the model's tokens;
+give the agent a sub-agent for read-only exploration; expose the same tools over MCP.
 
-That third one stays an exercise on purpose. `result.messages` will show you what a run sent;
-making the *next* run start from it is where the real problem begins.
+That third one stays an exercise on purpose, and 0.3.0 made it a better one. Holding the
+conversation on the `Agent` was three lines and is now done; what was never done for you is
+the hard half. Drop the oldest turns and you will find you cannot drop an assistant message
+without the tool results that answer it. Summarise instead and you have to decide what a
+summary of a tool call even is, and pay a model call to make one. Start from `agent.messages`
+and the token count the CLI already prints.
 
 ## License
 

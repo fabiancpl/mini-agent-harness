@@ -155,6 +155,11 @@ API has a different message shape (Anthropic's native API, for instance) needs e
 loop as well as a new client. Writing a client that translates in both directions is the
 cleaner fix and a genuinely instructive exercise.
 
+Two smaller notes. `Message.usage` is optional — return `None` and the CLI reports message and
+character counts instead of tokens, which is exactly what happens against servers that do not
+send a `usage` block. And retries live in `LLMClient`, not in the loop, so a client of your own
+owns its own retry policy; `Agent` will let anything your `complete` raises escape the run.
+
 ## Reading what actually happened
 
 Two things worth knowing before you debug an agent:
@@ -169,19 +174,31 @@ assistant turn with its tool calls, every tool result. From code it is `result.m
 Reading one is the fastest way to stop thinking of an agent as magic — it is a list of
 dictionaries and a `for` loop.
 
+In the REPL it is the whole *session*, not one turn, since 0.3.0 made turns share a
+conversation. The file is rewritten after each turn and each rewrite is complete, so the last
+one is everything that happened.
+
 ## Measuring a prompt change
 
 Editing `DEFAULT_SYSTEM_PROMPT` and eyeballing one run tells you nothing; models are
 stochastic. `evals/run_eval.py` runs each task N times against a real endpoint and prints a
-success rate:
+success rate, and can write that rate down so the next run has something to compare against:
 
 ```bash
 python evals/run_eval.py --config config.yaml --runs 5
+python evals/run_eval.py --save-baseline          # before the change
+python evals/run_eval.py --compare                # after it, side by side
 ```
+
+A baseline records the model, endpoint, step ceiling and enabled tools alongside the numbers,
+and `--compare` refuses to imply a comparison when any of those moved — change the model and
+the rates are measuring two different experiments.
 
 It is not a test and never joins `pytest` — see `TESTING.md` for why that distinction
 matters. Adding a task is a `(prompt, seed, checker)` triple in `TASKS`; the checker returns
-`None` when the property held or a sentence explaining what went wrong. **Unit-test your
+`None` when the property held or a sentence explaining what went wrong. Set `follow_up` to ask
+a second question in the same conversation, which is how the `followup` task measures whether
+memory actually works. **Unit-test your
 checker** in `tests/test_eval_checkers.py`: one that can never fail reports a cheerful 5/5
 forever and nothing notices.
 

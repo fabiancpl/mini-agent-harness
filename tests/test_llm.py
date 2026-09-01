@@ -540,3 +540,15 @@ def test_usage_is_never_sent_back_on_the_wire(post) -> None:
     entry = LLMClient(CONFIG).complete([]).to_history_entry()
 
     assert "usage" not in entry
+
+
+def test_a_429_without_a_retry_after_header_uses_the_normal_backoff(post, clock) -> None:
+    # The header is optional, and a 429 that omits it must not be treated as "wait zero".
+    post.replies = [
+        FakeResponse(None, status_code=429, text="slow down"),
+        FakeResponse(chat_response("ok")),
+    ]
+
+    LLMClient(CONFIG).complete([])
+
+    assert clock.slept == [1.0]

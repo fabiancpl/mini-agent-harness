@@ -63,6 +63,8 @@ llm:
   temperature: 0.0
   max_tokens: 2048
   timeout_seconds: 60
+  max_attempts: 3                         # total tries per request; 1 disables retrying
+  context_window: null                    # optional; lets the CLI show how full a session is
 
 agent:
   root_path: "./workspace"                # the sandbox; every tool path resolves under it
@@ -282,7 +284,7 @@ Design notes:
 `pytest`, no mocking library — `tmp_path` and small fakes only. Target: every invariant in
 `CLAUDE.md` has at least one test that fails if the invariant is removed.
 
-**As built: 286 tests, 99% line coverage and no partial branches** (`__main__.py` is covered
+**As built: 369 tests, 99% line coverage and no partial branches** (`__main__.py` is covered
 by a subprocess test that `coverage` cannot see into; every other module is at 100% under
 `--cov-branch`). Runs in ~2s, no network.
 

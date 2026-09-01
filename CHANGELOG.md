@@ -6,6 +6,55 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-01
+
+The "session" release. 0.1.0 was built to be read and 0.2.0 to be forked; both shipped with
+the same hole, and it is the first one anybody hits. You type a second thing into the REPL and
+the agent has forgotten the first.
+
+`PLAN.md` §11 called that out of scope and pointed at the workspace instead — a file written by
+one task is still there for the next — which is true, and is not the same thing. It covers
+*"add a section to notes.md"*. It cannot cover *"do that again, but in French"*, because there
+is no "that".
+
+**Why the exercise argument did not survive.** 0.2.0 argued that shipping memory would take
+away the most valuable exercise in the project. The mistake was in what "it" meant. Holding
+`messages` on the instance is three lines, and the README already spelled them out; nobody
+learns anything by typing them. The valuable half is the *second* half — what do you do when
+the window fills? So this release ships the three lines and keeps the question. The harness
+now tells you exactly how full the context is and gives you `reset`. It will never drop or
+summarise a message on your behalf, and compaction is still yours to design — against a
+session that now exists, which makes it a better exercise than it was.
+
+Retries and token accounting are here for the same reason, not as a grab bag. Memory changes
+what a failure costs, and it removes the bound that made accounting pointless.
+
+Still no new agent capability: ten tools, no delete, one sandboxed root.
+
+### Added
+
+- **Conversation memory within a session.** The REPL's turns share one conversation, so
+  follow-ups that refer to earlier ones work. `reset` forgets it and starts from the system
+  prompt; the banner says so. `Agent.reset()` is the API.
+- **Context reporting.** Every turn prints what the conversation costs — `context: 4,210 of
+  32,768 tokens (13%)` — and warns past 75%, pointing at `reset`. `Message.usage` and
+  `AgentResult.usage` expose the server's own count. New optional `llm.context_window`.
+- **Retries with backoff** (`llm.max_attempts`, default 3). Connection failures, timeouts,
+  429 and the transient 5xx are retried 1s then 2s apart; `Retry-After` is honoured when it
+  parses, capped at 30s. A bad key or a malformed URL still fails on the first try.
+- **Eval baselines.** `--save-baseline` / `--compare` write and diff `evals/baselines/*.json`,
+  recording model, endpoint, commit, run count, step ceiling and enabled tools, and refusing
+  to imply a comparison when those differ. A `followup` eval task measures the memory feature
+  itself, which a scripted fake cannot.
+
+### Changed
+
+- **`AgentResult.messages` is now the whole session**, not one run. `--dump-transcript` gets
+  better for free: the file it overwrites each turn is a complete transcript rather than only
+  the last exchange.
+- **`max_steps` is per-task, and that distinction now matters.** It bounds a run; nothing
+  bounds a session except `reset`. Noted in `CLAUDE.md` invariant 5.
+
 ### Fixed
 
 - **`--dump-transcript` creates the directory it is asked to write into.** `--dump-transcript
@@ -13,6 +62,39 @@ Notable changes to this project. The format follows
   which is the first thing anyone types to keep transcripts out of the way. Only missing
   parents are created; a dump that still cannot be written is reported and the run's answer
   is kept, as before.
+- **Synthesized tool-call ids no longer collide.** When a server omits an id, the client made
+  one from the tool name alone, so two calls to the same tool in one turn shared it and their
+  results could not be told apart. Now `call_0_read_file`. Latent before this release, since
+  the ambiguity died with the run; permanent once it is written into a session's history.
+- **`__version__` no longer drifts from `pyproject.toml`.** It said 0.1.0 through the whole of
+  0.2.0, because the only test asserted the string was truthy. It is now compared against
+  `pyproject.toml`. `uv.lock` had the same problem and is regenerated.
+- **`dumps/` is gitignored**, so following the transcript documentation no longer dirties the
+  working tree.
+
+### Upheld
+
+Still out of scope, and §11 now says why: **persistence** of any kind — no session files, no
+`--resume`, no named sessions; a conversation dies with the process. And **automatic context
+management** — no trimming, no summarisation, no compaction. Nothing leaves a conversation
+unless you say so. Also unchanged: no streaming, no parallel tool execution, no sub-agents, no
+MCP, no shell execution.
+
+One alternative was considered and rejected: `run(task, history=...)`, with the REPL owning the
+list. It makes commit-on-success automatic, since an exception never reaches the caller's
+assignment. But `Agent.reset()` is a better API than a parameter every caller must thread, and
+a `history` argument invites callers to hand in a malformed list — precisely the thing the loop
+works hard to make unreachable.
+
+### Known limitations
+
+- **A session grows without bound.** That is the deliberate half of this release: the harness
+  measures it and warns, and the decision stays yours. A very long conversation will
+  eventually be refused by the provider, and `reset` is the answer.
+- Conversation memory does not survive the process, so `--task` invocations are still
+  independent of each other.
+- Unchanged from 0.2.0: the OpenAI message shape is still built inline in `Agent.run`, so a
+  provider with a different shape needs edits to the loop and not just a new client.
 
 ## [0.2.0] — 2026-08-27
 
@@ -52,7 +134,9 @@ anything.
 ### Upheld
 
 `PLAN.md` §11 was not reopened: still no token accounting, retries, streaming, conversational
-memory, parallel tool execution, sub-agents, MCP, or shell execution. `AgentResult.messages`
+memory, parallel tool execution, sub-agents, MCP, or shell execution. *(Three of those —
+memory, retries and token accounting — were reopened in 0.3.0, with the argument in PLAN.md
+§13. The paragraph below is kept as the record of what was true in 0.2.0.)* `AgentResult.messages`
 is not memory — the loop still builds its history inside `run` and every task still starts
 from the system prompt, which `test_exposing_the_transcript_did_not_make_the_loop_stateful`
 enforces. "Make the REPL remember previous turns" stays a reader exercise, because meeting
@@ -124,11 +208,14 @@ were found and covered; see the warning at the end of `TESTING.md`.
 
 - **No conversational memory between tasks.** Each REPL turn starts a fresh conversation.
   The workspace persists, so the agent can rediscover its own work without remembering it.
+  *(Built in 0.3.0.)*
 - **Folders accumulate** — there is no `rmdir` and nothing empties a directory.
 - **No evals.** Running against a real provider is a measurement, not a test, and is
   deliberately deferred. `TESTING.md` has the reasoning and a sketch. *(Built in 0.2.0.)*
 - Out of scope by design: streaming, retries/backoff, token accounting, parallel tool
-  execution, sub-agents, MCP, shell execution.
+  execution, sub-agents, MCP, shell execution. *(Retries and token accounting were built in
+  0.3.0; the rest still stand.)*
 
+[0.3.0]: https://github.com/fabiancpl/mini-agent-harness/releases/tag/v0.3.0
 [0.2.0]: https://github.com/fabiancpl/mini-agent-harness/releases/tag/v0.2.0
 [0.1.0]: https://github.com/fabiancpl/mini-agent-harness/releases/tag/v0.1.0

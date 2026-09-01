@@ -187,9 +187,9 @@ class LLMClient:
                     return response, attempt  # success, or a failure retrying cannot fix
                 last_error = None
 
-            if attempt == self.config.max_attempts:
-                break
-            time.sleep(self._delay_before(attempt, response))
+            # No wait after the final attempt -- there is nothing left to wait for.
+            if attempt < self.config.max_attempts:
+                time.sleep(self._delay_before(attempt, response))
 
         if response is not None:
             return response, self.config.max_attempts  # out of attempts, still a real reply

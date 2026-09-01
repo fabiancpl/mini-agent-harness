@@ -109,7 +109,11 @@ behaviour here, the tests must be updated deliberately, never "fixed" to pass.
    and fed back to the model as the observation text so it can recover. Only genuinely
    unexpected exceptions propagate.
 5. **The loop is bounded.** `max_steps` always terminates the loop, and the agent reports
-   that it ran out of steps rather than pretending to answer.
+   that it ran out of steps rather than pretending to answer. Note the scope: `max_steps`
+   bounds one **run**. Since 0.3.0 a **session** is a single conversation and nothing bounds
+   it -- it grows until the user types `reset`. That is deliberate, and it is why the CLI
+   reports the context size after every turn; the harness must never drop or summarise a
+   message on the user's behalf.
 6. **Secrets stay out of the repo.** The config file holds `api_key_env`, a variable *name*.
    `config.yaml`, `.env`, and `workspace/` are gitignored.
 

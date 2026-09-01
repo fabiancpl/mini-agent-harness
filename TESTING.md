@@ -6,7 +6,7 @@ unusual for an agent — what would and would not be worth adding.
 ## Running the tests
 
 ```bash
-uv run pytest                                          # 286 tests, ~2s, no network beyond localhost
+uv run pytest                                          # 369 tests, ~2s, no network beyond localhost
 uv run pytest tests/test_sandbox.py                    # one module
 uv run pytest -k "move or copy"                        # by name
 uv run pytest --cov=mini_agent --cov-report=term-missing
@@ -23,16 +23,22 @@ Every test is named for the behaviour it protects, so a failure reads as a sente
 | Test module | Real | Faked |
 | --- | --- | --- |
 | `test_sandbox`, `test_config`, `test_registry`, `test_tools_*` | filesystem, temp dirs | nothing |
-| `test_llm` | payload construction, response parsing | `requests.post` |
+| `test_llm` | payload construction, response parsing, the retry schedule | `requests.post`, and `time` — so no test ever really sleeps |
 | `test_agent` | the ReAct loop, registry, **real tools on a real workspace** | the `LLMClient` object |
 | `test_cli` | argv, YAML config, sandbox, tools, files, exit codes | `LLMClient`, injected via `llm_factory` |
 | `test_cli` (2 tests) | **a real subprocess** — `python -m mini_agent` | no model involved |
 | `test_offline_demo` | **a real socket** — runs `examples/offline_demo.py` as a subprocess | the model's decisions only |
 | `test_word_count_example` | the EXTENDING.md walkthrough tool, on a real workspace | nothing |
-| `test_eval_checkers` | the eval checkers, on real directories | nothing — the evals themselves never run here |
+| `test_eval_checkers` | the eval checkers and the baseline comparison, on real directories | nothing — the evals themselves never run here |
 
 `main(argv, llm_factory=...)` exists precisely so the last two layers are reachable: it takes
 its dependencies as parameters and returns an exit code instead of calling `sys.exit`.
+
+The faked `time` in `test_llm` is worth a second look, because it is not only about speed.
+Replacing the name inside `llm.py` — exactly how `requests.post` is already replaced — lets a
+test **assert the backoff schedule** (`clock.slept == [1.0, 2.0]`) rather than merely tolerate
+it, and needs no `sleep=` parameter that exists only for tests. It is also worth the trouble:
+before it existed, one connection-failure test spent three real seconds proving its point.
 
 ## What "end-to-end" means for an agent harness
 
@@ -98,7 +104,11 @@ evals eventually:
 
 - **Prompt sensitivity.** Change one line of `DEFAULT_SYSTEM_PROMPT`, re-run, watch the
   success rate move. That is the core skill of agent engineering, and with a scripted fake
-  the prompt is inert — it cannot be taught offline.
+  the prompt is inert — it cannot be taught offline. Since 0.3.0 you can write the rate down
+  (`--save-baseline`) and diff against it (`--compare`), rather than comparing two scrollbacks
+  from memory. The baseline records what it measured — model, endpoint, step ceiling, enabled
+  tools — and says so when those changed, because two rates from different setups are two
+  different experiments.
 - **Failure modes you did not anticipate.** A script can only reproduce bugs you already know
   about. A real model — especially a small local one — finds them: it loops, batches calls
   unexpectedly, invents tools, emits malformed JSON.

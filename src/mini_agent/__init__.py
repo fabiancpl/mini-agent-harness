@@ -8,4 +8,4 @@ from __future__ import annotations
 # *installed* version, which lags the source in an editable checkout -- a bump would then fail
 # the suite until someone re-ran `uv sync`, which is a worse trap than the one it fixes.
 # So: keep the literal, and let test_the_reported_version_matches_pyproject enforce the pair.
-__version__ = "0.2.0"
+__version__ = "0.3.0"
