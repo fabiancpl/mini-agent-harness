@@ -26,6 +26,8 @@ from run_eval import (
     check_renamed,
     check_searched_cleanly,
     check_summarised,
+    comparability_warnings,
+    summarise,
 )
 
 
@@ -192,3 +194,72 @@ def test_search_fails_when_the_agent_ran_out_of_steps(tmp_path: Path) -> None:
     exhausted = AgentResult(answer=None, steps=(), stopped_early=True)
 
     assert check_searched_cleanly(tmp_path, exhausted) == "ran out of steps"
+
+
+# --- baselines -------------------------------------------------------------------------------
+#
+# Same argument as the checkers above: a comparison that can never report a regression would
+# print a reassuring table forever and nothing would notice. These are pure functions of two
+# dicts, so they cost nothing to test properly.
+
+
+def test_summarise_collapses_attempts_into_passed_over_total() -> None:
+    results = {"delete": [None, "it deleted the file", None], "rename": [None]}
+
+    assert summarise(results) == {
+        "delete": {"passed": 2, "total": 3},
+        "rename": {"passed": 1, "total": 1},
+    }
+
+
+def test_summarise_reports_a_task_that_never_passed() -> None:
+    assert summarise({"delete": ["nope", "nope"]}) == {"delete": {"passed": 0, "total": 2}}
+
+
+def baseline(**overrides: object) -> dict[str, object]:
+    """A baseline that is comparable to itself; each test changes exactly one thing."""
+    return {
+        "model": "m",
+        "base_url": "http://x",
+        "max_steps": 8,
+        "runs": 5,
+        "enabled_tools": None,
+        "results": {"delete": {"passed": 5, "total": 5}},
+    } | overrides
+
+
+def test_two_identical_runs_are_comparable() -> None:
+    assert comparability_warnings(baseline(), baseline()) == []
+
+
+def test_a_different_model_is_not_comparable() -> None:
+    warnings = comparability_warnings(baseline(), baseline(model="other"))
+
+    assert len(warnings) == 1
+    assert "model changed" in warnings[0]
+
+
+def test_a_different_step_ceiling_is_not_comparable() -> None:
+    # A task that needs six steps fails at max_steps=4 for reasons that have nothing to do
+    # with the prompt you are trying to evaluate.
+    warnings = comparability_warnings(baseline(), baseline(max_steps=4))
+
+    assert len(warnings) == 1
+    assert "step ceiling changed" in warnings[0]
+
+
+def test_a_different_tool_allow_list_is_not_comparable() -> None:
+    # The rename task cannot pass without `move`, so trimming the registry silently changes
+    # what the number means.
+    warnings = comparability_warnings(baseline(), baseline(enabled_tools=["read_file"]))
+
+    assert len(warnings) == 1
+    assert "enabled tools changed" in warnings[0]
+
+
+def test_every_difference_is_reported_not_just_the_first() -> None:
+    warnings = comparability_warnings(
+        baseline(), baseline(model="other", base_url="http://y", runs=3)
+    )
+
+    assert len(warnings) == 3
