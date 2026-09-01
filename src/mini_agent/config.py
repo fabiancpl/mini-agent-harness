@@ -31,6 +31,9 @@ class LLMConfig:
     timeout_seconds: int = 60
     #: Total attempts for one request, not extra tries after the first: 1 disables retrying.
     max_attempts: int = 3
+    #: The model's context window, if you know it. None means "unknown", and the CLI then
+    #: reports token counts without a percentage rather than inventing a denominator.
+    context_window: int | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,7 @@ def _load_llm(section: dict[str, Any]) -> LLMConfig:
             "max_tokens",
             "timeout_seconds",
             "max_attempts",
+            "context_window",
         },
     )
 
@@ -118,6 +122,11 @@ def _load_llm(section: dict[str, Any]) -> LLMConfig:
             section.get("timeout_seconds", 60), "llm.timeout_seconds", minimum=1
         ),
         max_attempts=_as_int(section.get("max_attempts", 3), "llm.max_attempts", minimum=1),
+        context_window=(
+            None
+            if section.get("context_window") is None
+            else _as_int(section["context_window"], "llm.context_window", minimum=1)
+        ),
     )
 
 

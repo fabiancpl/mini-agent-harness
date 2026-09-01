@@ -25,6 +25,9 @@ DEFAULT_CONFIG_PATH = "config.yaml"
 MAX_OBSERVATION_CHARS = 400
 #: Long arguments (a whole file's content, say) are trimmed the same way.
 MAX_ARGUMENT_CHARS = 60
+#: Warn once the conversation passes this share of the window. Presentation policy, so it
+#: lives here rather than in the config: `Agent` carries the number outward and never prints.
+CONTEXT_WARNING_FRACTION = 0.75
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -97,8 +100,8 @@ def main(
 
     _print_banner(config, registry.names(), total_registered)
     if args.task:
-        return _run_once(agent, args.task, args.dump_transcript)
-    return _repl(agent, args.dump_transcript)
+        return _run_once(agent, args.task, args.dump_transcript, config.llm.context_window)
+    return _repl(agent, args.dump_transcript, config.llm.context_window)
 
 
 def run() -> None:
@@ -109,19 +112,26 @@ def run() -> None:
 # --- the two modes --------------------------------------------------------------------------
 
 
-def _run_once(agent: Agent, task: str, dump_path: str | None = None) -> int:
+def _run_once(
+    agent: Agent,
+    task: str,
+    dump_path: str | None = None,
+    context_window: int | None = None,
+) -> int:
     try:
         result = agent.run(task)
     except HarnessError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
     _print_result(result)
+    # No advice here: one-shot mode has no next turn to spend the context on.
+    _print_context(agent, result, context_window, offer_reset=False)
     _dump_transcript(result, dump_path)
     # Running out of steps is a failure: scripts calling this should be able to tell.
     return EXIT_ERROR if result.stopped_early else EXIT_OK
 
 
-def _repl(agent: Agent, dump_path: str | None = None) -> int:
+def _repl(agent: Agent, dump_path: str | None = None, context_window: int | None = None) -> int:
     # Say up front that turns build on each other, and name the way out. There are three
     # commands now, which is one more than fits in a parenthetical -- so list them.
     print("Type a task. Commands: 'reset' to forget the conversation, 'exit' to quit.")
@@ -147,6 +157,7 @@ def _repl(agent: Agent, dump_path: str | None = None) -> int:
         try:
             result = agent.run(task)
             _print_result(result)
+            _print_context(agent, result, context_window, offer_reset=True)
             # Each turn overwrites the file, and now that is the point rather than a
             # limitation: `result.messages` is the whole session, so the last write is a
             # complete transcript of everything that happened. Before 0.3.0 it could only
@@ -172,6 +183,48 @@ def _print_banner(config: Config, tool_names: list[str], total_registered: int) 
     count = f"{len(tool_names)} of {total_registered} registered — " if trimmed else ""
     print(f"tools:     {count}{', '.join(tool_names)}")
     print()
+
+
+def _print_context(
+    agent: Agent, result: AgentResult, context_window: int | None, *, offer_reset: bool
+) -> None:
+    """Say how big the conversation has become.
+
+    This is the whole answer to context growth in 0.3.0, and the answer is "you decide". The
+    harness reports and warns; it never drops a message on your behalf. Deciding what to throw
+    away when the window fills is the interesting problem, and it stays yours -- see PLAN.md.
+
+    Two shapes, depending on whether the server told us anything:
+
+        context: 4,210 of 32,768 tokens (13%)
+        context: 12 messages, 48,120 characters (this server reports no token usage)
+
+    Both are facts. Estimating tokens from character counts was considered and rejected: on
+    this workload -- tool schemas, JSON arguments, directory listings -- text tokenizes at
+    nearer 2-3 characters per token than the usual 4, so the estimate reads low exactly when
+    the window is filling. An indicator that fails toward "you are fine" is worse than none.
+    """
+    if result.usage is None:
+        characters = sum(len(str(message.get("content") or "")) for message in agent.messages)
+        print(
+            f"  context: {len(agent.messages):,} messages, {characters:,} characters "
+            f"(this server reports no token usage)\n"
+        )
+        return
+
+    # total_tokens, not prompt_tokens: the completion has already been appended to the
+    # conversation, so this is the floor for what the *next* request will cost.
+    used = result.usage.total_tokens
+    if context_window is None:
+        print(f"  context: {used:,} tokens (set llm.context_window to see how full that is)\n")
+        return
+
+    fraction = used / context_window
+    line = f"  context: {used:,} of {context_window:,} tokens ({fraction:.0%})"
+    if fraction >= CONTEXT_WARNING_FRACTION:
+        advice = "type 'reset' to start over" if offer_reset else "the next run may not fit"
+        line += f" -- running out of room, {advice}"
+    print(line + "\n")
 
 
 def _dump_transcript(result: AgentResult, path: str | None) -> None:

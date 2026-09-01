@@ -382,3 +382,24 @@ def test_does_not_validate_tool_names_here(write_config) -> None:
     data["tools"] = {"enabled": ["delete_everything"]}
 
     assert load_config(write_config(data)).enabled_tools == ("delete_everything",)
+
+
+def test_context_window_is_optional(write_config) -> None:
+    # Unknown is the honest default: without it the CLI reports tokens but no percentage,
+    # rather than inventing a denominator.
+    assert load_config(write_config()).llm.context_window is None
+
+
+def test_reads_context_window(write_config) -> None:
+    data = base_config()
+    data["llm"]["context_window"] = 32768
+
+    assert load_config(write_config(data)).llm.context_window == 32768
+
+
+def test_rejects_a_context_window_below_one(write_config) -> None:
+    data = base_config()
+    data["llm"]["context_window"] = 0
+
+    with pytest.raises(ConfigError, match="llm.context_window"):
+        load_config(write_config(data))

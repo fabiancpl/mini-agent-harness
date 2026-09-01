@@ -43,11 +43,32 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class Usage:
+    """What the server said the request cost, in its own tokenizer's terms.
+
+    Reported rather than estimated. Counting tokens locally means shipping a tokenizer, and
+    guessing from character counts is worse than useless here: tool schemas, JSON arguments
+    and file paths are punctuation-dense and tokenize at nearer 2-3 characters per token than
+    the usual 4, so an estimate would read low exactly when the window is filling up.
+
+    Not every OpenAI-compatible server sends a `usage` block, which is why this is optional
+    everywhere it appears.
+    """
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+@dataclass(frozen=True)
 class Message:
     """What the model said: some text, some tool calls, or both."""
 
     content: str | None
     tool_calls: tuple[ToolCall, ...] = ()
+    #: None when the server did not report any. Never sent back on the wire -- see
+    #: `to_history_entry`, which builds the outgoing dict from content and tool calls alone.
+    usage: Usage | None = None
 
     def to_history_entry(self) -> dict[str, Any]:
         """Render this message back into the wire format, to append to the conversation.
@@ -216,7 +237,26 @@ def _parse_response(data: dict[str, Any]) -> Message:
         content=message.get("content"),
         # The index is only used to synthesise an id when the server omits one -- see below.
         tool_calls=tuple(_parse_tool_call(raw, index) for index, raw in enumerate(raw_calls)),
+        usage=_parse_usage(data.get("usage")),
     )
+
+
+def _parse_usage(raw: Any) -> Usage | None:
+    """Read the usage block if there is one. Missing or malformed is not an error.
+
+    Token counts are a convenience for the person watching, never something the loop depends
+    on, so a server that omits them or sends something unexpected must not break a run.
+    """
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return Usage(
+            prompt_tokens=int(raw.get("prompt_tokens", 0)),
+            completion_tokens=int(raw.get("completion_tokens", 0)),
+            total_tokens=int(raw.get("total_tokens", 0)),
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_tool_call(raw: dict[str, Any], index: int = 0) -> ToolCall:

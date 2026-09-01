@@ -27,6 +27,12 @@ llm:
   # 3 x timeout_seconds plus the backoff waits, so lower one if you lower the other.
   max_attempts: 3
 
+  # Your model's context window, if you know it. Optional: without it the CLI still reports
+  # how many tokens a conversation has used, it just cannot say how full that is. Since turns
+  # share a conversation, that number grows until you type 'reset' -- nothing is ever dropped
+  # on your behalf, so this is the gauge that tells you when to.
+  # context_window: 32768
+
 agent:
   # The sandbox root. Every path the agent supplies is resolved under this folder, and
   # anything that lands outside it is refused. Relative paths here are interpreted

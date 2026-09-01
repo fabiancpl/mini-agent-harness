@@ -14,8 +14,14 @@ from pathlib import Path
 import pytest
 
 from mini_agent.cli import build_parser, main
+from mini_agent.llm import Message, Usage
 
-from conftest import FakeLLMClient, acts, answer  # pytest puts tests/ on sys.path
+from conftest import (  # pytest puts tests/ on sys.path
+    FakeLLMClient,
+    acts,
+    answer,
+    base_config,
+)
 
 # --- helpers --------------------------------------------------------------------------------
 
@@ -537,3 +543,84 @@ def test_an_unwritable_transcript_path_does_not_lose_the_run(
     assert code == 0
     assert "Done." in captured.out
     assert "could not write transcript" in captured.err
+
+
+# --- context reporting -----------------------------------------------------------------------
+#
+# The whole of 0.3.0's answer to context growth: report it, warn about it, never act on it.
+
+
+def answer_with_usage(text: str, total: int) -> Message:
+    return Message(content=text, usage=Usage(prompt_tokens=total - 5, completion_tokens=5,
+                                             total_tokens=total))
+
+
+@pytest.fixture
+def windowed_config(write_config, tmp_path: Path) -> Path:
+    """A config that knows its model's context window, so percentages can be printed."""
+    data = base_config()
+    data["llm"]["context_window"] = 8000
+    path = write_config(data)
+    (tmp_path / "workspace").mkdir(exist_ok=True)
+    return path
+
+
+def test_reports_tokens_against_the_window(windowed_config: Path, capsys) -> None:
+    main(
+        ["--config", str(windowed_config), "--task", "hi"],
+        llm_factory=lambda config: FakeLLMClient([answer_with_usage("done", 1000)]),
+    )
+
+    assert "context: 1,000 of 8,000 tokens (12%)" in capsys.readouterr().out
+
+
+def test_warns_when_the_window_is_nearly_full(
+    windowed_config: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    client = FakeLLMClient([answer_with_usage("done", 7000)])
+    feed(monkeypatch, "first", "exit")
+
+    main(["--config", str(windowed_config)], llm_factory=lambda config: client)
+
+    out = capsys.readouterr().out
+    assert "running out of room" in out
+    assert "reset" in out
+
+
+def test_does_not_warn_with_room_to_spare(
+    windowed_config: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    client = FakeLLMClient([answer_with_usage("done", 100)])
+    feed(monkeypatch, "first", "exit")
+
+    main(["--config", str(windowed_config)], llm_factory=lambda config: client)
+
+    assert "running out of room" not in capsys.readouterr().out
+
+
+def test_reports_exact_counts_when_the_server_sends_no_usage(cli_config: Path, capsys) -> None:
+    # No estimate, no invented percentage: two true numbers and a note saying why.
+    main(
+        ["--config", str(cli_config), "--task", "hi"],
+        llm_factory=fake_llm(answer("done")),
+    )
+
+    out = capsys.readouterr().out
+    assert "reports no token usage" in out
+    assert "messages" in out and "characters" in out
+
+
+def test_reports_tokens_without_a_percentage_when_the_window_is_unknown(
+    write_config, tmp_path: Path, capsys
+) -> None:
+    data = base_config()  # no llm.context_window
+    (tmp_path / "workspace").mkdir(exist_ok=True)
+
+    main(
+        ["--config", str(write_config(data)), "--task", "hi"],
+        llm_factory=lambda config: FakeLLMClient([answer_with_usage("done", 1234)]),
+    )
+
+    out = capsys.readouterr().out
+    assert "context: 1,234 tokens" in out
+    assert "%" not in out

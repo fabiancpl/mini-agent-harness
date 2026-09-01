@@ -16,7 +16,7 @@ import requests
 from mini_agent import llm as llm_module
 from mini_agent.config import LLMConfig
 from mini_agent.errors import LLMError
-from mini_agent.llm import LLMClient, Message, ToolCall
+from mini_agent.llm import LLMClient, Message, ToolCall, Usage
 
 CONFIG = LLMConfig(
     base_url="https://example.test/v1",
@@ -500,3 +500,43 @@ def test_an_unparseable_retry_after_falls_back_to_the_backoff(post, clock) -> No
     LLMClient(CONFIG).complete([])
 
     assert clock.slept == [1.0]
+
+
+# --- token usage ---------------------------------------------------------------------------
+
+
+def test_reads_the_usage_block(post) -> None:
+    body = chat_response("ok")
+    body["usage"] = {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+    post.response = FakeResponse(body)
+
+    usage = LLMClient(CONFIG).complete([]).usage
+
+    assert usage == Usage(prompt_tokens=100, completion_tokens=20, total_tokens=120)
+
+
+def test_usage_is_none_when_the_server_omits_it(post) -> None:
+    # Plenty of OpenAI-compatible servers do not send one. That is not an error.
+    post.response = FakeResponse(chat_response("ok"))
+
+    assert LLMClient(CONFIG).complete([]).usage is None
+
+
+def test_a_malformed_usage_block_is_ignored_rather_than_fatal(post) -> None:
+    # Token counts are for the human watching; the loop never depends on them, so a server
+    # sending something unexpected must not take the run down with it.
+    body = chat_response("ok")
+    body["usage"] = {"prompt_tokens": "lots"}
+    post.response = FakeResponse(body)
+
+    assert LLMClient(CONFIG).complete([]).usage is None
+
+
+def test_usage_is_never_sent_back_on_the_wire(post) -> None:
+    body = chat_response("ok")
+    body["usage"] = {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+    post.response = FakeResponse(body)
+
+    entry = LLMClient(CONFIG).complete([]).to_history_entry()
+
+    assert "usage" not in entry

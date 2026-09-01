@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .errors import HarnessError
-from .llm import SupportsComplete, ToolCall
+from .llm import SupportsComplete, ToolCall, Usage
 from .registry import ToolRegistry
 
 DEFAULT_SYSTEM_PROMPT = """\
@@ -82,6 +82,12 @@ class AgentResult:
     #: returns its own turn and the first one. The dicts are the same objects the agent is
     #: still using, so read them and do not edit them.
     messages: tuple[dict[str, Any], ...] = ()
+    #: What the *last* request cost, as the server counted it, or None if it did not say.
+    #:
+    #: The last one is the interesting one: `total_tokens` is prompt plus completion, and the
+    #: completion has since been appended to the conversation. So it is the floor for what the
+    #: next request will cost -- the number that predicts, rather than the one that reminisces.
+    usage: Usage | None = None
 
     @property
     def tool_calls_made(self) -> int:
@@ -172,6 +178,7 @@ class Agent:
                     answer=message.content or "",
                     steps=tuple(steps),
                     messages=tuple(messages),
+                    usage=message.usage,
                 )
 
             # The model must see its own tool calls before the results that answer them.
@@ -199,7 +206,11 @@ class Agent:
         # for when it is not.
         self.messages = messages
         return AgentResult(
-            answer=None, steps=tuple(steps), stopped_early=True, messages=tuple(messages)
+            answer=None,
+            steps=tuple(steps),
+            stopped_early=True,
+            messages=tuple(messages),
+            usage=message.usage,
         )
 
     def _observe(self, call: ToolCall) -> Observation:
