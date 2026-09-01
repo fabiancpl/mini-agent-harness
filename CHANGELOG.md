@@ -4,6 +4,13 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+**Released entries are never edited again** -- not to note that a limitation was later fixed,
+not to soften a judgement that turned out wrong. Each one is the record of what shipped and
+what was believed at the time, and a record whose past moves is not a record. What changed is
+described in the entry for the release that changed it; what is true *now* lives in
+`README.md`, and what is in or out of scope lives in `PLAN.md`. Correcting a factual error --
+a wrong date, a miscounted figure -- is a different thing and is fine.
+
 ## [Unreleased]
 
 ## [0.3.0] — 2026-09-01
@@ -134,9 +141,7 @@ anything.
 ### Upheld
 
 `PLAN.md` §11 was not reopened: still no token accounting, retries, streaming, conversational
-memory, parallel tool execution, sub-agents, MCP, or shell execution. *(Three of those —
-memory, retries and token accounting — were reopened in 0.3.0, with the argument in PLAN.md
-§13. The paragraph below is kept as the record of what was true in 0.2.0.)* `AgentResult.messages`
+memory, parallel tool execution, sub-agents, MCP, or shell execution. `AgentResult.messages`
 is not memory — the loop still builds its history inside `run` and every task still starts
 from the system prompt, which `test_exposing_the_transcript_did_not_make_the_loop_stateful`
 enforces. "Make the REPL remember previous turns" stays a reader exercise, because meeting
@@ -208,13 +213,11 @@ were found and covered; see the warning at the end of `TESTING.md`.
 
 - **No conversational memory between tasks.** Each REPL turn starts a fresh conversation.
   The workspace persists, so the agent can rediscover its own work without remembering it.
-  *(Built in 0.3.0.)*
 - **Folders accumulate** — there is no `rmdir` and nothing empties a directory.
 - **No evals.** Running against a real provider is a measurement, not a test, and is
-  deliberately deferred. `TESTING.md` has the reasoning and a sketch. *(Built in 0.2.0.)*
+  deliberately deferred. `TESTING.md` has the reasoning and a sketch.
 - Out of scope by design: streaming, retries/backoff, token accounting, parallel tool
-  execution, sub-agents, MCP, shell execution. *(Retries and token accounting were built in
-  0.3.0; the rest still stand.)*
+  execution, sub-agents, MCP, shell execution.
 
 [0.3.0]: https://github.com/fabiancpl/mini-agent-harness/releases/tag/v0.3.0
 [0.2.0]: https://github.com/fabiancpl/mini-agent-harness/releases/tag/v0.2.0
