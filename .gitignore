@@ -226,3 +226,5 @@ workspace/
 # is per-machine, and worktrees/ holds entire checkouts that must never be committed.
 .claude/settings.local.json
 .claude/worktrees/
+# The folder dedicated for the conversation dumps (when requested)
+dumps/
