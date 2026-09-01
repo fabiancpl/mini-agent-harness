@@ -20,6 +20,13 @@ llm:
   max_tokens: 2048
   timeout_seconds: 60
 
+  # Total attempts per request, not extra tries after the first: 1 turns retrying off.
+  # Only transient faults are retried -- a refused connection, a timeout, a 429 or a 5xx.
+  # A bad key or a typo'd base_url fails immediately, because retrying it only makes the
+  # error slower. Note the worst case multiplies: 3 attempts against a server that hangs is
+  # 3 x timeout_seconds plus the backoff waits, so lower one if you lower the other.
+  max_attempts: 3
+
 agent:
   # The sandbox root. Every path the agent supplies is resolved under this folder, and
   # anything that lands outside it is refused. Relative paths here are interpreted

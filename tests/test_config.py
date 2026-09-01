@@ -36,8 +36,25 @@ def test_applies_documented_defaults(write_config) -> None:
     assert config.llm.temperature == 0.0
     assert config.llm.max_tokens == 2048
     assert config.llm.timeout_seconds == 60
+    assert config.llm.max_attempts == 3
     assert config.agent.max_steps == 12
     assert config.agent.system_prompt is None
+
+
+def test_reads_max_attempts(write_config) -> None:
+    data = base_config()
+    data["llm"]["max_attempts"] = 1  # the documented way to turn retrying off
+
+    assert load_config(write_config(data)).llm.max_attempts == 1
+
+
+def test_rejects_a_max_attempts_below_one(write_config) -> None:
+    # 0 attempts would never send the request at all, which is not what anyone means by it.
+    data = base_config()
+    data["llm"]["max_attempts"] = 0
+
+    with pytest.raises(ConfigError, match="llm.max_attempts"):
+        load_config(write_config(data))
 
 
 def test_reads_explicit_values(write_config) -> None:

@@ -11,6 +11,7 @@ decide -- whether to act or answer -- comes from `Message.tool_calls` being empt
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -18,6 +19,18 @@ import requests
 
 from .config import LLMConfig
 from .errors import LLMError
+
+#: Status codes worth sending the same request again. Listed rather than written as `>= 500`
+#: because most 5xx are not transient in the way that matters: a 501 from a server that does
+#: not implement tool calling will say 501 forever, and retrying only delays the error.
+RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+
+#: Seconds to wait before attempt 2, 3, ... Doubling, and deliberately not jittered: jitter
+#: exists to stop a fleet of clients retrying in lockstep, and there is one client here.
+BACKOFF_SECONDS = (1.0, 2.0, 4.0)
+
+#: A hostile or misconfigured `Retry-After` should not be able to hang the CLI for an hour.
+MAX_RETRY_AFTER_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -98,23 +111,15 @@ class LLMClient:
             # is precisely the branch the ReAct loop turns on, so never force it.
             payload["tool_choice"] = "auto"
 
-        try:
-            response = requests.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {self.config.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=self.config.timeout_seconds,
-            )
-        except requests.RequestException as exc:
-            raise LLMError(f"Could not reach {url}: {exc}") from exc
+        response, attempts = self._post_with_retries(url, payload)
 
         if response.status_code >= 400:
             # The body usually says exactly what is wrong (bad key, unknown model, context
             # length), so pass it through rather than hiding it behind the status code.
-            raise LLMError(f"{url} returned HTTP {response.status_code}: {response.text[:500]}")
+            tried = "" if attempts == 1 else f" after {attempts} attempts"
+            raise LLMError(
+                f"{url} returned HTTP {response.status_code}{tried}: {response.text[:500]}"
+            )
 
         try:
             data = response.json()
@@ -122,6 +127,82 @@ class LLMClient:
             raise LLMError(f"{url} did not return JSON: {response.text[:200]!r}") from exc
 
         return _parse_response(data)
+
+    def _post_with_retries(
+        self, url: str, payload: dict[str, Any]
+    ) -> tuple[requests.Response, int]:
+        """POST, trying again on the failures that are worth trying again.
+
+        Returns the last response and how many attempts it took. Note it *returns* a failing
+        response rather than raising on one: the caller already turns a 4xx/5xx into an
+        `LLMError` carrying the server's own explanation, and retries must not make a failure
+        less diagnosable than it was before.
+
+        Only two exception types are retried. `requests.RequestException` -- what this used to
+        catch wholesale -- also covers `MissingSchema`, `InvalidURL` and `TooManyRedirects`,
+        which are typos in `base_url`. Retrying a typo three times makes the error slower and
+        no clearer.
+
+        Retrying a POST is normally a question ("did the server already do the work?"), and it
+        is safe here only because a chat completion has no server-side effect. The tools run on
+        this machine, after the response comes back.
+        """
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
+        last_error: requests.RequestException | None = None
+
+        for attempt in range(1, self.config.max_attempts + 1):
+            response = None
+            try:
+                response = requests.post(
+                    url, headers=headers, json=payload, timeout=self.config.timeout_seconds
+                )
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                last_error = exc
+            else:
+                if response.status_code not in RETRY_STATUS:
+                    return response, attempt  # success, or a failure retrying cannot fix
+                last_error = None
+
+            if attempt == self.config.max_attempts:
+                break
+            time.sleep(self._delay_before(attempt, response))
+
+        if response is not None:
+            return response, self.config.max_attempts  # out of attempts, still a real reply
+
+        raise LLMError(
+            f"Could not reach {url} after {_plural_attempts(self.config.max_attempts)}: "
+            f"{last_error}"
+        ) from last_error
+
+    def _delay_before(self, attempt: int, response: requests.Response | None) -> float:
+        """How long to wait before the next attempt: the server's answer if it gave one."""
+        if response is not None and response.status_code == 429:
+            # A 429 usually comes with the server telling you exactly how long to wait, and
+            # guessing shorter than that just earns another 429. Only honour an integer, and
+            # cap it: a misconfigured header should not hang the CLI for an hour.
+            seconds = _parse_retry_after(response.headers.get("Retry-After"))
+            if seconds is not None:
+                return min(seconds, MAX_RETRY_AFTER_SECONDS)
+        return BACKOFF_SECONDS[min(attempt, len(BACKOFF_SECONDS)) - 1]
+
+
+def _plural_attempts(count: int) -> str:
+    return "1 attempt" if count == 1 else f"{count} attempts"
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """`Retry-After` as whole seconds, or None. The HTTP-date form is not worth the code."""
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    return seconds if seconds >= 0 else None
 
 
 def _parse_response(data: dict[str, Any]) -> Message:

@@ -29,6 +29,8 @@ class LLMConfig:
     temperature: float = 0.0
     max_tokens: int = 2048
     timeout_seconds: int = 60
+    #: Total attempts for one request, not extra tries after the first: 1 disables retrying.
+    max_attempts: int = 3
 
 
 @dataclass(frozen=True)
@@ -84,7 +86,15 @@ def _load_llm(section: dict[str, Any]) -> LLMConfig:
     _reject_unknown_keys(
         "section 'llm'",
         section,
-        {"base_url", "model", "api_key_env", "temperature", "max_tokens", "timeout_seconds"},
+        {
+            "base_url",
+            "model",
+            "api_key_env",
+            "temperature",
+            "max_tokens",
+            "timeout_seconds",
+            "max_attempts",
+        },
     )
 
     # The file stores the *name* of an environment variable, so the secret itself stays out
@@ -107,6 +117,7 @@ def _load_llm(section: dict[str, Any]) -> LLMConfig:
         timeout_seconds=_as_int(
             section.get("timeout_seconds", 60), "llm.timeout_seconds", minimum=1
         ),
+        max_attempts=_as_int(section.get("max_attempts", 3), "llm.max_attempts", minimum=1),
     )
 
 

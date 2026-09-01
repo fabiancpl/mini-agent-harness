@@ -7,6 +7,7 @@ assert on exactly what would have gone over the wire.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -35,10 +36,18 @@ TOOL_SCHEMAS = [
 
 
 class FakeResponse:
-    def __init__(self, payload: Any = None, *, status_code: int = 200, text: str = "") -> None:
+    def __init__(
+        self,
+        payload: Any = None,
+        *,
+        status_code: int = 200,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self._payload = payload
         self.status_code = status_code
         self.text = text or json.dumps(payload)
+        self.headers = headers or {}
 
     def json(self) -> Any:
         if self._payload is None:
@@ -56,9 +65,20 @@ def post(monkeypatch: pytest.MonkeyPatch):
             self.kwargs: dict[str, Any] = {}
             self.response = FakeResponse(chat_response("ok"))
             self.error: Exception | None = None
+            #: Optional script for the retry tests: one entry consumed per call, each either a
+            #: FakeResponse to return or an exception to raise. `response`/`error` still work
+            #: unchanged when this is empty, which is what every other test in here uses.
+            self.replies: list[Any] = []
+            self.calls = 0
 
         def __call__(self, url: str, **kwargs: Any) -> FakeResponse:
             self.url, self.kwargs = url, kwargs
+            self.calls += 1
+            if self.replies:
+                reply = self.replies.pop(0)
+                if isinstance(reply, Exception):
+                    raise reply
+                return reply
             if self.error is not None:
                 raise self.error
             return self.response
@@ -70,6 +90,28 @@ def post(monkeypatch: pytest.MonkeyPatch):
     recorder = Recorder()
     monkeypatch.setattr(llm_module.requests, "post", recorder)
     return recorder
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch: pytest.MonkeyPatch):
+    """Replace the `time` module *inside llm.py* so retries never really sleep.
+
+    Autouse on purpose: a suite that takes three real seconds to prove a connection failure is
+    a suite people stop running. Replacing the name in llm.py's namespace mirrors how
+    `requests.post` is already faked, needs no production parameter that exists only for tests,
+    and lets a test assert the exact backoff sequence rather than merely tolerate it.
+    """
+
+    class FakeClock:
+        def __init__(self) -> None:
+            self.slept: list[float] = []
+
+        def sleep(self, seconds: float) -> None:
+            self.slept.append(seconds)
+
+    fake = FakeClock()
+    monkeypatch.setattr(llm_module, "time", fake)
+    return fake
 
 
 def chat_response(content: str | None, tool_calls: list[dict] | None = None) -> dict[str, Any]:
@@ -326,3 +368,135 @@ def test_base_url_with_a_trailing_slash_would_not_double_up(post) -> None:
     LLMClient(LLMConfig(base_url="https://example.test/v1", model="m", api_key="k")).complete([])
 
     assert "//chat" not in post.url
+
+
+# --- retries -------------------------------------------------------------------------------
+#
+# The `clock` fixture records what would have been slept, so these assert the backoff schedule
+# instead of tolerating it. `post.replies` scripts one entry per attempt.
+
+
+def test_a_transient_failure_is_retried_and_succeeds(post, clock) -> None:
+    post.replies = [
+        requests.ConnectionError("connection reset"),
+        FakeResponse(chat_response("recovered")),
+    ]
+
+    message = LLMClient(CONFIG).complete([])
+
+    assert message.content == "recovered"
+    assert post.calls == 2
+    assert clock.slept == [1.0]
+
+
+def test_retries_stop_at_max_attempts(post, clock) -> None:
+    post.replies = [requests.ConnectionError("nope")] * 3
+
+    with pytest.raises(LLMError, match="after 3 attempts"):
+        LLMClient(CONFIG).complete([])
+
+    assert post.calls == 3
+    assert clock.slept == [1.0, 2.0]  # waits between attempts, never after the last
+
+
+def test_a_timeout_is_transient_too(post, clock) -> None:
+    post.replies = [requests.Timeout("read timed out"), FakeResponse(chat_response("ok"))]
+
+    assert LLMClient(CONFIG).complete([]).content == "ok"
+    assert post.calls == 2
+
+
+def test_a_server_error_is_retried(post, clock) -> None:
+    post.replies = [
+        FakeResponse(None, status_code=503, text="upstream busy"),
+        FakeResponse(chat_response("ok")),
+    ]
+
+    assert LLMClient(CONFIG).complete([]).content == "ok"
+    assert post.calls == 2
+
+
+def test_an_exhausted_server_error_still_reports_the_server_body(post, clock) -> None:
+    """Retrying must not make a failure less diagnosable than it was before.
+
+    The body is where the server says what is actually wrong, so the last response is returned
+    rather than swallowed, and the normal HTTP error is raised from it.
+    """
+    post.replies = [FakeResponse(None, status_code=503, text="upstream busy")] * 3
+
+    with pytest.raises(LLMError, match="upstream busy"):
+        LLMClient(CONFIG).complete([])
+
+    assert post.calls == 3
+
+
+def test_a_bad_api_key_is_not_retried(post, clock) -> None:
+    # 401 will say 401 forever. Retrying it makes the error slower and no clearer.
+    post.replies = [FakeResponse(None, status_code=401, text='{"error": "invalid api key"}')]
+
+    with pytest.raises(LLMError, match="invalid api key"):
+        LLMClient(CONFIG).complete([])
+
+    assert post.calls == 1
+    assert clock.slept == []
+
+
+def test_a_malformed_url_is_not_retried(post, clock) -> None:
+    # MissingSchema is a typo in base_url, not a transient fault. It used to be caught by the
+    # blanket `except requests.RequestException`, which would now retry it three times.
+    post.replies = [requests.exceptions.MissingSchema("no scheme")]
+
+    with pytest.raises(requests.exceptions.MissingSchema):
+        LLMClient(CONFIG).complete([])
+
+    assert post.calls == 1
+
+
+def test_max_attempts_of_one_disables_retrying(post, clock) -> None:
+    post.replies = [requests.ConnectionError("nope")]
+
+    with pytest.raises(LLMError, match="after 1 attempt"):
+        LLMClient(replace(CONFIG, max_attempts=1)).complete([])
+
+    assert post.calls == 1
+    assert clock.slept == []
+
+
+def test_a_429_waits_as_long_as_the_server_asked(post, clock) -> None:
+    post.replies = [
+        FakeResponse(None, status_code=429, text="slow down", headers={"Retry-After": "5"}),
+        FakeResponse(chat_response("ok")),
+    ]
+
+    assert LLMClient(CONFIG).complete([]).content == "ok"
+    assert clock.slept == [5.0]  # the server's number, not the default 1.0
+
+
+def test_an_absurd_retry_after_is_capped(post, clock) -> None:
+    # A misconfigured or hostile header must not hang the CLI for an hour.
+    post.replies = [
+        FakeResponse(None, status_code=429, text="slow down", headers={"Retry-After": "99999"}),
+        FakeResponse(chat_response("ok")),
+    ]
+
+    LLMClient(CONFIG).complete([])
+
+    assert clock.slept == [30.0]
+
+
+def test_an_unparseable_retry_after_falls_back_to_the_backoff(post, clock) -> None:
+    # The HTTP-date form of Retry-After is legal and not worth parsing; ignore what we cannot
+    # read rather than crashing on it.
+    post.replies = [
+        FakeResponse(
+            None,
+            status_code=429,
+            text="slow",
+            headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"},
+        ),
+        FakeResponse(chat_response("ok")),
+    ]
+
+    LLMClient(CONFIG).complete([])
+
+    assert clock.slept == [1.0]
